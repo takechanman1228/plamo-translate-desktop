@@ -27,8 +27,11 @@ listed for review. This also applies to shapes with automatic sizing.
 Open **Show / hide review locations** for applied/retained paragraph or line
 locations and layout warnings. Applied means that validated text was written;
 it is not a measure of translation accuracy. An unchanged or wholly rejected
-result cannot be saved. Cancellation discards the unfinished result. Opening another file
-or closing the window asks before discarding a finished translation that was not saved.
+result cannot be saved. Cancellation discards the unfinished result. Completed translations with changed content appear in **Translated files**, newest first.
+Click a filename to open its translated document in the system viewer. Copies are kept in
+the application's local data directory across restarts, including when the original file
+has moved. **Save as** exports a separate copy. If writing the history copy fails, the
+app warns before replacing or closing an unexported result.
 
 Word pagination, floating objects, fixed-height table rows and text boxes need
 native Office review. PowerPoint fitting is an estimate, not a renderer: font

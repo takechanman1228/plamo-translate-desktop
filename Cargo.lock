@@ -5069,6 +5069,7 @@ version = "0.6.0"
 dependencies = [
  "appdata",
  "async-channel",
+ "chrono",
  "desktop",
  "engine",
  "files",
@@ -5077,6 +5078,7 @@ dependencies = [
  "rust-i18n",
  "serde",
  "serde_json",
+ "tempfile",
  "update",
  "winreg",
  "winresource",

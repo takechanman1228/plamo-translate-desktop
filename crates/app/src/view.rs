@@ -489,6 +489,7 @@ enum InstallState {
 
 pub struct TranslatorView {
     files: files::FilePanel,
+    file_history: Vec<crate::file_history::Entry>,
     file_tab: bool,
     jobs: crate::jobs::Jobs,
     source: Entity<TextareaState>,
@@ -810,6 +811,7 @@ impl TranslatorView {
 
         let mut this = Self {
             files: files::FilePanel::default(),
+            file_history: Vec::new(),
             file_tab: false,
             jobs: crate::jobs::Jobs::default(),
             source,
@@ -880,6 +882,7 @@ impl TranslatorView {
             _subscriptions: subscriptions,
             _events: events,
         };
+        this.load_file_history(cx);
         this.link_selection_focus(cx);
         this.clean_up_update(cx);
         if this.settings.check_updates {

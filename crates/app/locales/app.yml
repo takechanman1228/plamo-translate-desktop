@@ -690,6 +690,18 @@ files.drop_prompt:
   en: "Drop a file here"
   ja: "ここにファイルをドロップ"
 
+files.history:
+  en: "Translated files (%{count})"
+  ja: "翻訳済みファイル（%{count}件）"
+
+files.history_target:
+  en: "To %{target}"
+  ja: "翻訳先：%{target}"
+
+files.history_failed:
+  en: "Could not keep this result in history. Use Save as… to keep a copy. %{error}"
+  ja: "履歴に保存できませんでした。「名前を付けて保存」で訳文を保存できます。%{error}"
+
 files.choose:
   en: "Choose a file…"
   ja: "ファイルを選ぶ…"

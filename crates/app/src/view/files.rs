@@ -75,6 +75,14 @@ impl FileDocument {
         }
     }
 
+    fn extension(&self) -> &'static str {
+        match self {
+            Self::Text(_) => "txt",
+            Self::Markdown(_) => "md",
+            Self::Office { deck, .. } => deck.extension(),
+        }
+    }
+
     fn empty(&self) -> bool {
         match self {
             Self::Text(doc) => doc.source().trim().is_empty(),
@@ -86,9 +94,26 @@ impl FileDocument {
 
 #[derive(Clone)]
 enum FileOutput {
-    Text(String),
+    Text(Arc<str>),
     Markdown(Arc<Vec<u8>>),
-    Office(Vec<Vec<Option<String>>>),
+    Office(Arc<Vec<Vec<Option<String>>>>),
+}
+
+impl FileOutput {
+    fn bytes<'a>(
+        &'a self,
+        document: &FileDocument,
+        target: &str,
+    ) -> Result<std::borrow::Cow<'a, [u8]>, ::files::FileError> {
+        Ok(match (document, self) {
+            (FileDocument::Text(doc), Self::Text(text)) => doc.write(text).into(),
+            (FileDocument::Markdown(_), Self::Markdown(bytes)) => bytes.as_slice().into(),
+            (FileDocument::Office { deck, .. }, Self::Office(parts)) => {
+                deck.write(target, parts)?.into()
+            }
+            _ => return Err(::files::FileError::MismatchedResults),
+        })
+    }
 }
 
 struct CompletedFile {
@@ -276,7 +301,7 @@ fn finish_office(
         parts.push(targets);
     }
     Some(CompletedFile {
-        output: FileOutput::Office(parts),
+        output: FileOutput::Office(Arc::new(parts)),
         review,
         has_changes,
     })
@@ -295,12 +320,15 @@ pub(super) struct FilePanel {
     pub(super) message: Option<String>,
     saved: Option<PathBuf>,
     show_review: bool,
+    archived: bool,
 }
 
 impl FilePanel {
     /// A finished translation that exists only in memory.
     fn unsaved(&self) -> bool {
-        self.saved.is_none() && self.completed.as_ref().is_some_and(|c| c.has_changes)
+        !self.archived
+            && self.saved.is_none()
+            && self.completed.as_ref().is_some_and(|c| c.has_changes)
     }
 }
 
@@ -494,6 +522,7 @@ impl TranslatorView {
         self.files.cancelling = false;
         self.files.message = None;
         self.files.saved = None;
+        self.files.archived = false;
         self.files.target = request.options.target.as_str().to_owned();
         let job = match document {
             FileDocument::Text(_) => self
@@ -640,7 +669,7 @@ impl TranslatorView {
                             .map(|(text, warnings)| CompletedFile {
                                 has_changes: !text.trim().is_empty()
                                     && text.trim() != doc.source().trim(),
-                                output: FileOutput::Text(text),
+                                output: FileOutput::Text(text.into()),
                                 review: FileReview {
                                     partial_translation: !warnings.is_empty(),
                                     locations: warnings
@@ -706,6 +735,7 @@ impl TranslatorView {
                 if self.files.completed.is_none() && self.files.message.is_none() {
                     self.files.message = Some(t!("files.translation_failed").into_owned());
                 }
+                self.archive_file(cx);
                 self.jobs.finish_file(*job).unwrap_or(false)
             }
             Event::Failed { job, .. } if *job == active => {
@@ -731,6 +761,87 @@ impl TranslatorView {
         true
     }
 
+    pub(super) fn load_file_history(&mut self, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async {
+                    crate::file_history::load(&appdata::settings::data_file("file-history"))
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                match result {
+                    Ok(entries) => {
+                        // A translation may have finished while the directory was being scanned.
+                        let known = this
+                            .file_history
+                            .iter()
+                            .map(|entry| &entry.output)
+                            .collect::<std::collections::HashSet<_>>();
+                        let older = entries
+                            .into_iter()
+                            .filter(|entry| !known.contains(&entry.output))
+                            .collect::<Vec<_>>();
+                        this.file_history.extend(older);
+                    }
+                    Err(error) => {
+                        this.files.message =
+                            Some(t!("files.error", error = error.to_string()).into_owned())
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn archive_file(&mut self, cx: &mut Context<Self>) {
+        let Some(result) = self
+            .files
+            .completed
+            .as_ref()
+            .filter(|result| result.has_changes)
+        else {
+            return;
+        };
+        let Some((source, document)) = self.files.loaded.clone() else {
+            return;
+        };
+        let output = result.output.clone();
+        let target = self.files.target.clone();
+        self.files.io_busy = true;
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let bytes = output.bytes(&document, &target)?;
+                    crate::file_history::record(
+                        &appdata::settings::data_file("file-history"),
+                        &source,
+                        target,
+                        document.extension(),
+                        &bytes,
+                    )
+                    .map_err(::files::FileError::from)
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.files.io_busy = false;
+                match result {
+                    Ok(entry) => {
+                        this.files.archived = true;
+                        this.file_history.retain(|old| old.output != entry.output);
+                        this.file_history.insert(0, entry);
+                    }
+                    Err(error) => {
+                        this.files.message =
+                            Some(t!("files.history_failed", error = error.to_string()).into_owned())
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     pub(super) fn save_file(&mut self, cx: &mut Context<Self>) {
         if self.jobs.busy() || self.files.io_busy {
             return;
@@ -746,14 +857,7 @@ impl TranslatorView {
         }
         let translation = completed.output.clone();
         let target = self.files.target.clone();
-        let extension = match &translation {
-            FileOutput::Text(_) => "txt",
-            FileOutput::Markdown(_) => "md",
-            FileOutput::Office(_) => match &document {
-                FileDocument::Office { deck, .. } => deck.extension(),
-                _ => return,
-            },
-        };
+        let extension = document.extension();
         let suggested = format!(
             "{}.{target}.{extension}",
             source.file_stem().unwrap_or_default().to_string_lossy()
@@ -767,17 +871,7 @@ impl TranslatorView {
             let result = match selected {
                 Ok(Ok(Some(destination))) => Some(
                     cx.background_spawn(async move {
-                        let bytes = match (document, translation) {
-                            (FileDocument::Text(doc), FileOutput::Text(text)) => doc.write(&text),
-                            (FileDocument::Markdown(_), FileOutput::Markdown(bytes)) => {
-                                ::files::save_new(&source, &destination, &bytes)?;
-                                return Ok(destination);
-                            }
-                            (FileDocument::Office { deck, .. }, FileOutput::Office(parts)) => {
-                                deck.write(&target, &parts)?
-                            }
-                            _ => return Err(::files::FileError::MismatchedResults),
-                        };
+                        let bytes = translation.bytes(&document, &target)?;
                         ::files::save_new(&source, &destination, &bytes)?;
                         Ok::<_, ::files::FileError>(destination)
                     })
@@ -827,6 +921,9 @@ impl TranslatorView {
                     .mx_auto()
                     .gap_3()
                     .child(content)
+                    .when(!self.file_history.is_empty(), |panel| {
+                        panel.child(self.render_file_history(cx))
+                    })
                     .when(self.files.io_busy, |panel| {
                         panel.child(
                             div()
@@ -853,6 +950,107 @@ impl TranslatorView {
                         )
                     }),
             )
+            .into_any_element()
+    }
+
+    fn export_history_file(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        if self.file_operation_busy() {
+            return;
+        }
+        let picker = cx.prompt_for_new_path(
+            Path::new("."),
+            path.file_name().and_then(|name| name.to_str()),
+        );
+        self.files.io_busy = true;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = match picker.await {
+                Ok(Ok(Some(destination))) => {
+                    cx.background_spawn(async move {
+                        ::files::save_new(&path, &destination, &std::fs::read(&path)?)
+                    })
+                    .await
+                }
+                Ok(Err(error)) => Err(::files::FileError::Io(std::io::Error::other(
+                    error.to_string(),
+                ))),
+                _ => Ok(()),
+            };
+            let _ = this.update(cx, |this, cx| {
+                this.files.io_busy = false;
+                if let Err(error) = result {
+                    this.files.message =
+                        Some(t!("files.error", error = error.to_string()).into_owned());
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn render_file_history(&self, cx: &Context<Self>) -> AnyElement {
+        let theme = cx.theme();
+        let rows = self.file_history.iter().enumerate().map(|(index, entry)| {
+            let path = entry.output.clone();
+            let export = path.clone();
+            h_flex()
+                .gap_3()
+                .flex_wrap()
+                .border_t_1()
+                .border_color(theme.border)
+                .px_3()
+                .py_1()
+                .child(
+                    Button::new(("history-result", index))
+                        .ghost()
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .icon(Lucide::FileText)
+                        .label(entry.filename().to_owned())
+                        .tooltip(t!("files.open_saved").into_owned())
+                        .on_click(move |_, _, cx| cx.open_with_system(&path)),
+                )
+                .child(
+                    div().text_sm().text_color(theme.muted_foreground).child(
+                        t!(
+                            "files.history_target",
+                            target = lang::language_name(entry.target())
+                        )
+                        .into_owned(),
+                    ),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(theme.muted_foreground)
+                        .child(entry.completed_at()),
+                )
+                .child(
+                    Button::new(("history-export", index))
+                        .small()
+                        .ghost()
+                        .icon(Lucide::Download)
+                        .label(t!("files.save").into_owned())
+                        .disabled(self.file_operation_busy())
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.export_history_file(export.clone(), cx)
+                        })),
+                )
+        });
+        v_flex()
+            .rounded_xl()
+            .border_1()
+            .border_color(theme.border)
+            .child(
+                div()
+                    .px_4()
+                    .py_2()
+                    .text_sm()
+                    .font_medium()
+                    .child(t!("files.history", count = self.file_history.len()).into_owned()),
+            )
+            .children(rows)
             .into_any_element()
     }
 
