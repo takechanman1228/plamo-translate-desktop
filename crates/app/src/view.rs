@@ -3002,12 +3002,12 @@ impl Render for TranslatorView {
 
         v_flex()
             .key_context(KEY_CONTEXT)
-            .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
+            .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
                 if this.current_job.is_some() || this.file_operation_busy() {
                     return;
                 }
                 if paths.paths().len() == 1 {
-                    this.read_file(paths.paths()[0].clone(), cx);
+                    this.drop_file(paths.paths()[0].clone(), window, cx);
                 } else {
                     this.file_tab = true;
                     this.files.message = Some(t!("files.one_file").into_owned());

@@ -320,6 +320,21 @@ pub(super) struct FilePanel {
     show_review: bool,
 }
 
+impl FilePanel {
+    /// A finished translation that exists only in memory.
+    fn unsaved(&self) -> bool {
+        self.saved.is_none() && self.completed.as_ref().is_some_and(|c| c.has_changes)
+    }
+}
+
+/// What the user was doing when asked whether to drop an unsaved translation.
+#[derive(Clone)]
+enum AfterDiscard {
+    Choose,
+    Read(PathBuf),
+    Close { quit: bool },
+}
+
 impl TranslatorView {
     pub(super) fn file_operation_busy(&self) -> bool {
         self.jobs.busy() || self.files.io_busy
@@ -328,7 +343,74 @@ impl TranslatorView {
         self.files.loaded.as_ref().map(|(_, doc)| doc.japanese())
     }
 
-    pub(crate) fn choose_file(&mut self, cx: &mut Context<Self>) {
+    /// Opens the file picker, asking first if that would replace an unsaved translation.
+    pub(crate) fn open_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.files.unsaved() && !self.file_operation_busy() {
+            self.confirm_discard(AfterDiscard::Choose, window, cx);
+        } else {
+            self.choose_file(cx);
+        }
+    }
+
+    /// Loads a dropped file, asking first if that would replace an unsaved translation.
+    pub(super) fn drop_file(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        if self.files.unsaved() && !self.file_operation_busy() {
+            self.file_tab = true;
+            self.confirm_discard(AfterDiscard::Read(path), window, cx);
+            cx.notify();
+        } else {
+            self.read_file(path, cx);
+        }
+    }
+
+    /// The translation stays until another file has actually been read: cancelling the picker
+    /// after agreeing here loses nothing.
+    fn confirm_discard(&mut self, then: AfterDiscard, window: &mut Window, cx: &mut Context<Self>) {
+        if window.has_active_dialog(cx) {
+            return;
+        }
+        let view = cx.entity().downgrade();
+        window.open_dialog(cx, move |dialog, _, _| {
+            let view = view.clone();
+            let then = then.clone();
+            dialog
+                .title(t!("files.discard_title").into_owned())
+                .child(t!("files.discard_body").into_owned())
+                .footer(
+                    h_flex()
+                        .gap_2()
+                        .child(
+                            Button::new("keep-file-result")
+                                .label(t!("files.discard_keep").into_owned())
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                        )
+                        .child(
+                            Button::new("discard-file-result")
+                                .danger()
+                                .label(t!("files.discard_confirm").into_owned())
+                                .on_click(move |_, window, cx| {
+                                    window.close_dialog(cx);
+                                    match then.clone() {
+                                        AfterDiscard::Close { quit: true } => cx.quit(),
+                                        AfterDiscard::Close { quit: false } => {
+                                            window.remove_window()
+                                        }
+                                        AfterDiscard::Choose => {
+                                            let _ =
+                                                view.update(cx, |this, cx| this.choose_file(cx));
+                                        }
+                                        AfterDiscard::Read(path) => {
+                                            let _ = view
+                                                .update(cx, |this, cx| this.read_file(path, cx));
+                                        }
+                                    }
+                                }),
+                        ),
+                )
+        });
+    }
+
+    fn choose_file(&mut self, cx: &mut Context<Self>) {
         if self.jobs.busy() || self.files.io_busy {
             return;
         }
@@ -363,7 +445,7 @@ impl TranslatorView {
         cx.notify();
     }
 
-    pub(super) fn read_file(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+    fn read_file(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         if self.jobs.busy() || self.files.io_busy {
             return;
         }
@@ -856,7 +938,7 @@ impl TranslatorView {
                     .icon(Lucide::FolderOpen)
                     .label(t!("files.choose").into_owned())
                     .map(|button| file_action(button, self.file_operation_busy(), cx))
-                    .on_click(cx.listener(|this, _, _, cx| this.choose_file(cx))),
+                    .on_click(cx.listener(|this, _, window, cx| this.open_file(window, cx))),
             )
             .into_any_element()
     }
@@ -897,7 +979,7 @@ impl TranslatorView {
                     .ghost()
                     .label(t!("files.change_file").into_owned())
                     .disabled(busy || io_busy)
-                    .on_click(cx.listener(|this, _, _, cx| this.choose_file(cx))),
+                    .on_click(cx.listener(|this, _, window, cx| this.open_file(window, cx))),
             )
             .map(|actions| {
                 if busy {
@@ -1115,6 +1197,10 @@ impl TranslatorView {
         cx: &mut Context<Self>,
     ) -> bool {
         if !self.jobs.busy() && !self.files.io_busy {
+            if self.files.unsaved() {
+                self.confirm_discard(AfterDiscard::Close { quit }, window, cx);
+                return false;
+            }
             return true;
         }
         if window.has_active_dialog(cx) {
@@ -1166,7 +1252,29 @@ impl TranslatorView {
 
 #[cfg(test)]
 mod file_completion_tests {
-    use super::{OfficeDocument, UnitResult, UnitTranslation, finish_office};
+    use super::{
+        CompletedFile, FileOutput, FilePanel, FileReview, OfficeDocument, UnitResult,
+        UnitTranslation, finish_office,
+    };
+
+    #[test]
+    fn only_a_finished_translation_that_was_never_saved_counts_as_unsaved() {
+        let completed = |has_changes| {
+            Some(CompletedFile {
+                output: FileOutput::Text("Translated.".into()),
+                review: FileReview::default(),
+                has_changes,
+            })
+        };
+        let mut panel = FilePanel::default();
+        assert!(!panel.unsaved());
+        panel.completed = completed(false);
+        assert!(!panel.unsaved());
+        panel.completed = completed(true);
+        assert!(panel.unsaved());
+        panel.saved = Some("out.en.txt".into());
+        assert!(!panel.unsaved());
+    }
 
     #[test]
     fn office_completion_rejects_zero_changes_after_amount_validation() {

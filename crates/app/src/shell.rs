@@ -113,8 +113,8 @@ pub fn init(
     // tabs removes the previously focused textarea from the view tree.
     cx.on_action(|_: &view::OpenFile, cx: &mut App| {
         if let Some((handle, view)) = cx.global::<Shell>().main.clone() {
-            let _ = handle.update(cx, |_, _, cx| {
-                let _ = view.update(cx, |this, cx| this.choose_file(cx));
+            let _ = handle.update(cx, |_, window, cx| {
+                let _ = view.update(cx, |this, cx| this.open_file(window, cx));
             });
         }
     });

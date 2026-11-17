@@ -770,6 +770,22 @@ files.close_body:
   en: "Keep the window open to continue, or stop and close it. Unsaved translations will be discarded."
   ja: "続行する場合はウィンドウを開いたままにします。中止して閉じると、未保存の訳文は破棄されます。"
 
+files.discard_title:
+  en: "The translation has not been saved"
+  ja: "訳文は保存されていません"
+
+files.discard_body:
+  en: "Continuing discards the finished translation. Keep it to save it first."
+  ja: "続けると、完了した訳文は破棄されます。保存する場合は「戻る」を選んでください。"
+
+files.discard_keep:
+  en: "Go back"
+  ja: "戻る"
+
+files.discard_confirm:
+  en: "Discard"
+  ja: "破棄する"
+
 files.continue:
   en: "Continue"
   ja: "続行"
