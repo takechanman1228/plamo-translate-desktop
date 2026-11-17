@@ -59,7 +59,8 @@ impl Document {
         let (source, bom, converted_encoding) = decode(bytes)?;
         if source
             .chars()
-            .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
+            // A form feed is an ordinary page break in plain text (RFCs, licence texts).
+            .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t' | '\u{c}'))
         {
             return Err(FileError::Encoding);
         }
@@ -304,6 +305,9 @@ mod tests {
         }
         assert!(Document::open(&[0xff, 0xfe, 0x00], "a.txt").is_err());
         assert!(Document::open(b"binary\0data", "a.txt").is_err());
+        let paged = "Page one.\n\u{c}Page two.\n";
+        let doc = Document::open(paged.as_bytes(), "rfc.txt").unwrap();
+        assert_eq!(doc.write(doc.source()), paged.as_bytes());
     }
 
     #[test]
