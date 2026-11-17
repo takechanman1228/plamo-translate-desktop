@@ -108,9 +108,9 @@ static RANGE: LazyLock<Regex> =
 static ENGLISH_MARKER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\byen\b|\bJPY\b|[¥￥]").unwrap());
 
-/// Yen amounts and whether a currency marker remains whose amount could not be read
+/// Readable yen amounts and the number of remaining currency markers
 /// ("one million yen", "¥1M").
-fn english(text: &str) -> (Vec<(u128, bool)>, bool) {
+fn english(text: &str) -> (Vec<(u128, bool)>, usize) {
     struct Found {
         range: Range<usize>,
         marked: bool,
@@ -166,7 +166,25 @@ fn english(text: &str) -> (Vec<(u128, bool)>, bool) {
         .filter(|found| found.marked)
         .filter_map(|found| found.amount)
         .collect();
-    let unread = ENGLISH_MARKER.find_iter(text).count() > amounts.len();
+    // A range can share a marker, and one amount can have both a prefix and a suffix.
+    let mut readable = found
+        .iter()
+        .filter(|item| item.marked && item.amount.is_some())
+        .peekable();
+    let unread = ENGLISH_MARKER
+        .find_iter(text)
+        .filter(|marker| {
+            while readable
+                .peek()
+                .is_some_and(|item| item.range.end <= marker.start())
+            {
+                readable.next();
+            }
+            !readable
+                .peek()
+                .is_some_and(|item| item.range.contains(&marker.start()))
+        })
+        .count();
     (amounts, unread)
 }
 
@@ -181,7 +199,7 @@ pub(crate) fn matches(source: &str, target: &str, language: &str) -> bool {
         }
         "ja" => {
             let target_amounts = japanese(target);
-            let unread = target.matches('円').count() > target_amounts.len();
+            let unread = target.matches('円').count() - target_amounts.len();
             (english(source).0, target_amounts, unread)
         }
         _ => return true,
@@ -194,12 +212,47 @@ pub(crate) fn matches(source: &str, target: &str, language: &str) -> bool {
         values.sort_unstable();
         values
     };
-    sorted_values(source) == sorted_values(target) || unread
+    let source = sorted_values(source);
+    let target = sorted_values(target);
+    if source == target {
+        return true;
+    }
+    if source.len().checked_sub(target.len()) != Some(unread) {
+        return false;
+    }
+    // Match each readable value once. Only the remaining values can be unknown.
+    let mut remaining = source.into_iter();
+    target
+        .into_iter()
+        .all(|value| remaining.any(|candidate| candidate == value))
 }
 
 #[cfg(test)]
 mod tests {
     use super::matches;
+
+    #[test]
+    fn unknown_amounts_do_not_hide_readable_mismatches() {
+        let source = "100万円または300万円";
+        assert!(!matches(source, "2,000,000 yen or ¥3M", "en"));
+        assert!(matches(source, "1,000,000 yen or ¥3M", "en"));
+        assert!(!matches(source, "JPY 1,000,000 yen", "en"));
+        assert!(!matches(
+            "1 million or 3 million yen",
+            "200万円または三百万円",
+            "ja"
+        ));
+        assert!(matches(
+            "1 million or 3 million yen",
+            "100万円または三百万円",
+            "ja"
+        ));
+        assert!(!matches(
+            "100万円、300万円、500万円",
+            "1,000,000 yen, 1,000,000 yen, ¥5M",
+            "en"
+        ));
+    }
 
     #[test]
     fn ranges_share_one_currency_marker_and_unread_amounts_are_not_rejected() {
