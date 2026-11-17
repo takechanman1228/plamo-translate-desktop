@@ -95,6 +95,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUST_VERSION }}
+      # Cargo resolves the workspace's git dependencies even for this isolated package.
+      # Match the Release job's workaround for long llama.cpp submodule paths.
+      - name: Shorten Cargo paths
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          git config --global core.longpaths true
+          "CARGO_HOME=D:\c" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - uses: Swatinem/rust-cache@v2
       # No model, PDF runtime, GUI or C/C++ build is needed for the file adapters.
       - run: cargo test -p files --release --locked
