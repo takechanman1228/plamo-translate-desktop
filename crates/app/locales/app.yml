@@ -691,20 +691,16 @@ files.drop_prompt:
   ja: "ここにファイルをドロップ"
 
 files.history_title:
-  en: "Translated files"
-  ja: "翻訳済みファイル"
+  en: "File translations"
+  ja: "ファイル翻訳一覧"
 
 files.filename:
   en: "File name"
   ja: "ファイル名"
 
 files.history_target:
-  en: "Translated to"
+  en: "Target"
   ja: "翻訳先"
-
-files.history_completed:
-  en: "Completed"
-  ja: "完了日時"
 
 files.history_exported:
   en: "Saved to %{path}"
@@ -738,14 +734,6 @@ files.choose:
   en: "Choose a file…"
   ja: "ファイルを選ぶ…"
 
-files.change_file:
-  en: "Change file…"
-  ja: "ファイルを変更…"
-
-files.translate_again:
-  en: "Translate again"
-  ja: "再翻訳"
-
 files.one_file:
   en: "Choose one file at a time."
   ja: "ファイルは1件ずつ選んでください。"
@@ -771,8 +759,28 @@ files.progress_label:
   ja: "翻訳の進捗"
 
 files.done:
-  en: "Translation complete"
-  ja: "翻訳完了"
+  en: "Completed"
+  ja: "完了"
+
+files.translate_file:
+  en: "Translate a file…"
+  ja: "ファイルを翻訳…"
+
+files.status:
+  en: "Status"
+  ja: "ステータス"
+
+files.ready:
+  en: "Ready"
+  ja: "準備完了"
+
+files.unchanged:
+  en: "No changes"
+  ja: "変更なし"
+
+files.needs_review:
+  en: "Review needed"
+  ja: "要確認"
 
 files.save:
   en: "Save as…"
@@ -781,14 +789,6 @@ files.save:
 files.open_saved:
   en: "Open translation"
   ja: "訳文を開く"
-
-files.reveal:
-  en: "Show in folder"
-  ja: "保存先を表示"
-
-files.saved:
-  en: "Saved as a new file"
-  ja: "別ファイルに保存済み"
 
 files.working:
   en: "Reading or saving file…"
@@ -877,10 +877,6 @@ files.check_word:
 files.show_review:
   en: "Show review details"
   ja: "確認の詳細を表示"
-
-files.hide_review:
-  en: "Hide review details"
-  ja: "確認の詳細を閉じる"
 
 files.slide:
   en: "Slide %{number}"

@@ -24,10 +24,15 @@ listed for review. This also applies to shapes with automatic sizing.
 
 ## Reviewing a result
 
-Open **Show review details** for applied/retained paragraph or line
-locations and layout warnings. Applied means that validated text was written;
-it is not a measure of translation accuracy. An unchanged or wholly rejected
-result cannot be saved. Cancellation discards the unfinished result. Completed translations with changed content appear in **Translated files**, newest first.
+Drop a file or choose **Translate a file…**, then start translation from its row.
+The Status column shows progress while translating. When the result is ready,
+**Save as…** appears on the same row, and the drop area is ready for the next file.
+Expand the row's status to see applied/retained locations and layout notes.
+**Review needed** identifies results with translation issues; content intentionally
+left in its source format is described in the details. Applied means that validated
+text was written. An unchanged or wholly rejected result cannot be saved.
+Cancellation discards the unfinished result. Completed translations with changed
+content stay in **File translations**, newest first.
 Click a filename to open its translated document in the system viewer. Copies are kept in
 the application's local data directory across restarts, including when the original file
 has moved. **Save as** exports a separate copy, starting in Downloads when available. Use the delete button on a row or **Clear history…** to remove the local copies. If writing the history copy fails, the

@@ -8,6 +8,7 @@ use engine::units::{Unit, UnitRequest, UnitResult, UnitTuning};
 use gpui_kit::component::{Icon, progress::Progress};
 
 use super::*;
+use crate::file_history::FileReview;
 
 pub(super) const FILE_PANEL_WIDTH: f32 = 780.;
 
@@ -122,15 +123,6 @@ struct CompletedFile {
     has_changes: bool,
 }
 
-#[derive(Default)]
-struct FileReview {
-    partial_translation: bool,
-    update_toc: bool,
-    check_slides: bool,
-    check_word: bool,
-    locations: Vec<String>,
-}
-
 struct UnitTranslation {
     results: Vec<Option<UnitResult>>,
     completed: usize,
@@ -243,6 +235,7 @@ fn finish_office(
                     has_changes |= changed;
                     let needs_review = paragraph.word_translation_needs_review(&text, target);
                     review.partial_translation |= !changed || needs_review;
+                    review.needs_review |= needs_review;
                     review.locations.push(
                         t!(
                             if changed {
@@ -268,6 +261,7 @@ fn finish_office(
                     }
                     return Some(text);
                 }
+                review.needs_review = true;
                 review.partial_translation = true;
                 review
                     .locations
@@ -320,16 +314,23 @@ pub(super) struct FilePanel {
     pub(super) message: Option<String>,
     saved: Option<PathBuf>,
     show_review: bool,
-    archived: Option<PathBuf>,
+    expanded_history: Option<PathBuf>,
     history_status: Option<String>,
+}
+
+fn completion_label(review: &FileReview) -> String {
+    t!(if review.needs_review {
+        "files.needs_review"
+    } else {
+        "files.done"
+    })
+    .into_owned()
 }
 
 impl FilePanel {
     /// A finished translation that exists only in memory.
     fn unsaved(&self) -> bool {
-        self.archived.as_ref().is_none_or(|path| !path.is_file())
-            && self.saved.is_none()
-            && self.completed.as_ref().is_some_and(|c| c.has_changes)
+        self.saved.is_none() && self.completed.as_ref().is_some_and(|c| c.has_changes)
     }
 }
 
@@ -492,7 +493,14 @@ impl TranslatorView {
     }
 
     pub(super) fn start_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.jobs.busy() || self.files.io_busy {
+        if self.jobs.busy()
+            || self.files.io_busy
+            || self
+                .files
+                .completed
+                .as_ref()
+                .is_some_and(|result| result.has_changes)
+        {
             return;
         }
         if !self.model_ready {
@@ -524,7 +532,7 @@ impl TranslatorView {
         self.files.cancelling = false;
         self.files.message = None;
         self.files.saved = None;
-        self.files.archived = None;
+        self.files.expanded_history = None;
         self.files.target = request.options.target.as_str().to_owned();
         let job = match document {
             FileDocument::Text(_) => self
@@ -674,6 +682,7 @@ impl TranslatorView {
                                     && text.trim() != doc.source().trim(),
                                 output: FileOutput::Text(text.into()),
                                 review: FileReview {
+                                    needs_review: !warnings.is_empty(),
                                     partial_translation: !warnings.is_empty(),
                                     locations: warnings
                                         .iter()
@@ -696,6 +705,7 @@ impl TranslatorView {
                                 has_changes: export.translated > 0,
                                 output: FileOutput::Markdown(Arc::new(export.bytes)),
                                 review: FileReview {
+                                    needs_review: export.translated < doc.segments().len(),
                                     partial_translation: !export.retained_lines.is_empty(),
                                     locations: doc
                                         .segments()
@@ -810,6 +820,7 @@ impl TranslatorView {
             return;
         };
         let output = result.output.clone();
+        let review = result.review.clone();
         let target = self.files.target.clone();
         self.files.io_busy = true;
         cx.spawn(async move |this, cx| {
@@ -822,6 +833,7 @@ impl TranslatorView {
                         target,
                         document.extension(),
                         &bytes,
+                        review,
                     )
                     .map_err(::files::FileError::from)
                 })
@@ -830,7 +842,7 @@ impl TranslatorView {
                 this.files.io_busy = false;
                 match result {
                     Ok(entry) => {
-                        this.files.archived = Some(entry.output.clone());
+                        this.files = FilePanel::default();
                         this.file_history.retain(|old| old.output != entry.output);
                         this.file_history.insert(0, entry);
                     }
@@ -889,6 +901,10 @@ impl TranslatorView {
                 this.files.io_busy = false;
                 match result {
                     Some(Ok(path)) => {
+                        this.files.history_status = Some(
+                            t!("files.history_exported", path = path.display().to_string())
+                                .into_owned(),
+                        );
                         this.files.saved = Some(path);
                         this.files.message = None;
                     }
@@ -905,10 +921,6 @@ impl TranslatorView {
     }
 
     pub(super) fn render_files(&self, cx: &mut Context<Self>) -> AnyElement {
-        let content = match &self.files.loaded {
-            Some((path, document)) => self.render_loaded_file(path, document, cx),
-            None => self.render_file_drop_zone(cx),
-        };
         let theme = cx.theme();
         div()
             .id("file-scroll")
@@ -923,10 +935,11 @@ impl TranslatorView {
                     .max_w(px(FILE_PANEL_WIDTH))
                     .mx_auto()
                     .gap_5()
-                    .child(content)
-                    .when(!self.file_history.is_empty(), |panel| {
-                        panel.child(self.render_file_history(cx))
-                    })
+                    .child(self.render_file_drop_zone(cx))
+                    .when(
+                        self.files.loaded.is_some() || !self.file_history.is_empty(),
+                        |panel| panel.child(self.render_file_history(cx)),
+                    )
                     .when_some(self.files.history_status.clone(), |panel, message| {
                         panel.child(
                             div()
@@ -1088,85 +1101,109 @@ impl TranslatorView {
 
     fn render_file_history(&self, cx: &Context<Self>) -> AnyElement {
         let theme = cx.theme();
-        let export_button = |id: ElementId| {
-            Button::new(id)
-                .small()
-                .outline()
-                .flex_none()
-                .icon(Lucide::Download)
-                .label(t!("files.save").into_owned())
-        };
-        let remove_button = |id: ElementId| {
-            Button::new(id)
-                .small()
-                .ghost()
-                .flex_none()
-                .label(t!("files.history_delete").into_owned())
-        };
+        // Use the same columns while reading the current file, translating it, and after
+        // publishing the cached result. The archive replaces the in-memory row atomically.
         let rows = self.file_history.iter().enumerate().map(|(index, entry)| {
-            let path = entry.output.clone();
+            let path = &entry.output;
+            let open = path.clone();
             let export = path.clone();
             let remove = path.clone();
             let suggested = entry.export_name();
-            h_flex()
-                .gap_3()
-                .border_t_1()
-                .border_color(theme.border)
-                .px_4()
-                .py_2()
+            let expanded = self.files.expanded_history.as_ref() == Some(path);
+            let name = v_flex()
+                .items_start()
+                .min_w_0()
                 .child(
-                    h_flex().flex_1().min_w_0().child(
-                        Button::new(("history-result", index))
-                            .ghost()
-                            .min_w_0()
-                            .max_w_full()
-                            .overflow_hidden()
-                            .icon(Lucide::FileText)
-                            .label(entry.filename().to_owned())
-                            .tooltip(t!("files.open_saved").into_owned())
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if path
-                                    .symlink_metadata()
-                                    .is_ok_and(|metadata| metadata.is_file())
-                                {
-                                    cx.open_with_system(&path);
-                                } else {
-                                    this.file_history.retain(|entry| entry.output != path);
-                                    this.files.message =
-                                        Some(t!("files.history_missing").into_owned());
-                                    cx.notify();
-                                }
-                            })),
-                    ),
+                    Button::new(("history-result", index))
+                        .small()
+                        .ghost()
+                        .min_w_0()
+                        .max_w_full()
+                        .overflow_hidden()
+                        .label(entry.filename().to_owned())
+                        .tooltip(t!("files.open_saved").into_owned())
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if open
+                                .symlink_metadata()
+                                .is_ok_and(|metadata| metadata.is_file())
+                            {
+                                cx.open_with_system(&open);
+                            } else {
+                                this.file_history.retain(|entry| entry.output != open);
+                                this.files.message = Some(t!("files.history_missing").into_owned());
+                                cx.notify();
+                            }
+                        })),
                 )
                 .child(
                     div()
-                        .w(px(100.))
-                        .text_sm()
-                        .child(lang::language_name(entry.target())),
-                )
-                .child(
-                    div()
-                        .w(px(140.))
-                        .text_sm()
+                        .pl_2()
+                        .text_xs()
                         .text_color(theme.muted_foreground)
                         .child(entry.completed_at()),
-                )
+                );
+            let status = if let Some(review) = entry.review() {
+                let label = completion_label(review);
+                let path = path.clone();
+                Button::new(("history-review", index))
+                    .small()
+                    .ghost()
+                    .icon(if expanded {
+                        Lucide::ChevronDown
+                    } else {
+                        Lucide::ChevronRight
+                    })
+                    .label(label)
+                    .tooltip(t!("files.show_review").into_owned())
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.files.show_review = false;
+                        this.files.expanded_history = (!expanded).then(|| path.clone());
+                        cx.notify();
+                    }))
+                    .into_any_element()
+            } else {
+                div()
+                    .pl_2()
+                    .text_sm()
+                    .child(t!("files.done").into_owned())
+                    .into_any_element()
+            };
+            let actions = h_flex()
+                .gap_1()
                 .child(
-                    export_button(("history-export", index).into())
+                    Button::new(("history-export", index))
+                        .small()
+                        .outline()
+                        .icon(Lucide::Download)
+                        .label(t!("files.save").into_owned())
                         .disabled(self.file_operation_busy())
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.export_history_file(export.clone(), &suggested, cx)
                         })),
                 )
                 .child(
-                    remove_button(("history-remove", index).into())
+                    Button::new(("history-remove", index))
+                        .small()
+                        .ghost()
+                        .label(t!("files.history_delete").into_owned())
                         .disabled(self.file_operation_busy())
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.confirm_remove_history(vec![remove.clone()], window, cx)
                         })),
-                )
+                );
+            v_flex()
+                .child(self.file_row(
+                    name,
+                    status,
+                    lang::language_name(entry.target()),
+                    actions,
+                    cx,
+                ))
+                .when_some(entry.review().filter(|_| expanded), |row, review| {
+                    row.child(self.render_file_review(review, cx))
+                })
         });
+        let count = self.file_history.len() + usize::from(self.files.loaded.is_some());
         let heading = h_flex()
             .gap_2()
             .child(
@@ -1179,65 +1216,40 @@ impl TranslatorView {
                 div()
                     .text_sm()
                     .text_color(theme.muted_foreground)
-                    .child(self.file_history.len().to_string()),
+                    .child(count.to_string()),
             )
             .child(div().flex_1())
-            .child(
-                Button::new("history-clear")
-                    .small()
-                    .ghost()
-                    .label(t!("files.history_clear").into_owned())
-                    .disabled(self.file_operation_busy())
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.confirm_remove_history(
-                            this.file_history
-                                .iter()
-                                .map(|entry| entry.output.clone())
-                                .collect(),
-                            window,
-                            cx,
-                        );
-                    })),
-            );
-        let columns = h_flex()
-            .gap_3()
-            .px_4()
-            .py_2()
-            .bg(theme.muted.opacity(0.5))
-            .text_sm()
+            .when(!self.file_history.is_empty(), |heading| {
+                heading.child(
+                    Button::new("history-clear")
+                        .small()
+                        .ghost()
+                        .label(t!("files.history_clear").into_owned())
+                        .disabled(self.file_operation_busy())
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.confirm_remove_history(
+                                this.file_history
+                                    .iter()
+                                    .map(|entry| entry.output.clone())
+                                    .collect(),
+                                window,
+                                cx,
+                            );
+                        })),
+                )
+            });
+        let columns = self
+            .file_row(
+                div().pl_2().child(t!("files.filename").into_owned()),
+                div().pl_2().child(t!("files.status").into_owned()),
+                t!("files.history_target").into_owned(),
+                div(),
+                cx,
+            )
             .text_color(theme.muted_foreground)
-            .child(
-                div()
-                    .pl_2()
-                    .flex_1()
-                    .child(t!("files.filename").into_owned()),
-            )
-            .child(
-                div()
-                    .w(px(100.))
-                    .child(t!("files.history_target").into_owned()),
-            )
-            .child(
-                div()
-                    .w(px(140.))
-                    .child(t!("files.history_completed").into_owned()),
-            )
-            .child(
-                div().invisible().flex_none().h_0().overflow_hidden().child(
-                    export_button("history-action-width".into())
-                        .role(None)
-                        .disabled(true),
-                ),
-            )
-            .child(
-                div().invisible().h_0().overflow_hidden().child(
-                    remove_button("history-remove-width".into())
-                        .role(None)
-                        .disabled(true),
-                ),
-            );
+            .bg(theme.muted.opacity(0.5));
         v_flex()
-            .gap_4()
+            .gap_3()
             .child(heading)
             .child(
                 v_flex()
@@ -1246,16 +1258,159 @@ impl TranslatorView {
                     .border_1()
                     .border_color(theme.border)
                     .child(columns)
+                    .when_some(self.files.loaded.as_ref(), |list, (path, doc)| {
+                        list.child(self.current_file_row(path, doc, cx))
+                    })
                     .children(rows),
             )
             .into_any_element()
     }
 
-    fn render_file_drop_zone(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn file_row(
+        &self,
+        name: impl IntoElement,
+        status: impl IntoElement,
+        target: String,
+        actions: impl IntoElement,
+        cx: &Context<Self>,
+    ) -> Div {
+        h_flex()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .text_sm()
+            .child(div().flex_1().min_w_0().overflow_hidden().child(name))
+            .child(h_flex().w(px(145.)).flex_none().child(status))
+            .child(div().w(px(80.)).truncate().child(target))
+            .child(
+                h_flex()
+                    .w(px(180.))
+                    .flex_none()
+                    .justify_end()
+                    .child(actions),
+            )
+    }
+
+    fn current_file_row(&self, path: &Path, doc: &FileDocument, cx: &Context<Self>) -> AnyElement {
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        let name = div().pl_2().font_medium().truncate().child(name);
+        let encoding = match doc {
+            FileDocument::Text(doc) => doc.converted_encoding,
+            FileDocument::Markdown(doc) => doc.converted_encoding(),
+            _ => None,
+        };
+        let mut actions = h_flex().gap_1();
+        let mut status = v_flex().w_full().pl_2().gap_1();
+        let target = if self.jobs.busy() || self.files.completed.is_some() {
+            lang::language_name(&self.files.target)
+        } else {
+            lang::language_name(self.target_choice.resolve_for(doc.japanese()))
+        };
+        let mut review = None;
+        if self.jobs.busy() {
+            let (done, total) = self.files.progress.unwrap_or_default();
+            let percent = done.saturating_mul(100).checked_div(total).unwrap_or(0);
+            status = status
+                .child(
+                    if total == 0 {
+                        t!("files.starting")
+                    } else {
+                        t!("files.progress", percent = percent)
+                    }
+                    .into_owned(),
+                )
+                .child(
+                    Progress::new("file-progress")
+                        .accessibility_label(t!("files.progress_label").into_owned())
+                        .color(cx.theme().primary)
+                        .loading(total == 0 || (total == 1 && done == 0))
+                        .value(percent as f32),
+                );
+            actions = actions.child(
+                Button::new("cancel-file")
+                    .small()
+                    .outline()
+                    .label(t!("action.stop").into_owned())
+                    .disabled(self.files.cancelling)
+                    .on_click(cx.listener(|this, _, _, cx| this.cancel_file(cx))),
+            );
+        } else if let Some(result) = &self.files.completed {
+            // Includes the fallback if the history directory cannot be written.
+            status = status.child(
+                Button::new("result-details")
+                    .small()
+                    .ghost()
+                    .label(if result.has_changes {
+                        completion_label(&result.review)
+                    } else {
+                        t!("files.unchanged").into_owned()
+                    })
+                    .icon(Lucide::ChevronDown)
+                    .tooltip(t!("files.show_review").into_owned())
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.files.expanded_history = None;
+                        this.files.show_review = !this.files.show_review;
+                        cx.notify();
+                    })),
+            );
+            review = self.files.show_review.then_some(&result.review);
+            if result.has_changes {
+                actions = actions.child(
+                    Button::new("save-file")
+                        .small()
+                        .outline()
+                        .icon(Lucide::Download)
+                        .label(t!("files.save").into_owned())
+                        .disabled(self.files.io_busy)
+                        .on_click(cx.listener(|this, _, _, cx| this.save_file(cx))),
+                );
+            }
+        } else {
+            status = status.child(t!("files.ready").into_owned());
+        }
+        if !self.jobs.busy()
+            && self
+                .files
+                .completed
+                .as_ref()
+                .is_none_or(|result| !result.has_changes)
+        {
+            actions = actions.child(
+                Button::new("translate-file")
+                    .small()
+                    .primary()
+                    .label(t!("action.translate").into_owned())
+                    .disabled(doc.empty() || self.files.io_busy)
+                    .on_click(cx.listener(|this, _, window, cx| this.start_file(window, cx))),
+            );
+        }
+        v_flex()
+            .child(self.file_row(name, status, target, actions, cx))
+            .when_some(encoding, |row, encoding| {
+                row.child(
+                    div()
+                        .px_4()
+                        .text_sm()
+                        .child(t!("files.encoding", encoding = encoding).into_owned()),
+                )
+            })
+            .when_some(review, |row, review| {
+                row.child(self.render_file_review(review, cx))
+            })
+            .into_any_element()
+    }
+
+    fn render_file_drop_zone(&self, cx: &Context<Self>) -> AnyElement {
         let theme = cx.theme();
         let accent = theme.primary;
         let drop_enabled = self.current_job.is_none() && !self.file_operation_busy();
-        let compact = !self.file_history.is_empty();
+        let compact = self.files.loaded.is_some() || !self.file_history.is_empty();
         v_flex()
             .id("file-drop-zone")
             .items_center()
@@ -1310,7 +1465,7 @@ impl TranslatorView {
             .child(
                 Button::new("choose-file")
                     .icon(Lucide::FolderOpen)
-                    .label(t!("files.choose").into_owned())
+                    .label(t!("files.translate_file").into_owned())
                     .primary()
                     .disabled(self.file_operation_busy())
                     .on_click(cx.listener(|this, _, window, cx| this.open_file(window, cx))),
@@ -1318,265 +1473,37 @@ impl TranslatorView {
             .into_any_element()
     }
 
-    fn render_loaded_file(
-        &self,
-        path: &Path,
-        doc: &FileDocument,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = cx.theme();
-        let accent = theme.primary;
-        let busy = self.jobs.busy();
-        let io_busy = self.files.io_busy;
-        let completed = self.files.completed.as_ref();
-        let encoding = match doc {
-            FileDocument::Text(doc) => doc.converted_encoding,
-            FileDocument::Markdown(doc) => doc.converted_encoding(),
-            _ => None,
-        };
-        let filename = path.file_name().unwrap_or_default().to_string_lossy();
-        let translate = Button::new("translate-file")
-            .label(
-                if completed.is_some() {
-                    t!("files.translate_again")
-                } else {
-                    t!("action.translate")
-                }
-                .into_owned(),
-            )
-            .disabled(doc.empty() || io_busy)
-            .on_click(cx.listener(|this, _, window, cx| this.start_file(window, cx)));
-        let actions = h_flex()
-            .flex_wrap()
-            .gap_2()
-            .child(
-                Button::new("choose-file")
-                    .ghost()
-                    .label(t!("files.change_file").into_owned())
-                    .disabled(busy || io_busy)
-                    .on_click(cx.listener(|this, _, window, cx| this.open_file(window, cx))),
-            )
-            .map(|actions| {
-                if busy {
-                    actions.child(
-                        Button::new("cancel-file")
-                            .danger()
-                            .outline()
-                            .label(t!("action.stop").into_owned())
-                            .disabled(self.files.cancelling)
-                            .on_click(cx.listener(|this, _, _, cx| this.cancel_file(cx))),
-                    )
-                } else if completed.is_some_and(|result| result.has_changes) {
-                    let primary = if let Some(path) = self.files.saved.clone() {
-                        Button::new("open-saved-file")
-                            .icon(Lucide::FileText)
-                            .label(t!("files.open_saved").into_owned())
-                            .on_click(move |_, _, cx| cx.open_with_system(&path))
-                    } else {
-                        self.save_file_button(cx).icon(Lucide::Download)
-                    };
-                    actions
-                        .child(translate.ghost())
-                        .child(primary.primary().disabled(io_busy))
-                } else {
-                    actions.child(translate.primary())
-                }
-            });
-        v_flex()
-            .rounded_xl()
-            .border_1()
-            .border_color(theme.border)
-            .child(
-                h_flex()
-                    .items_center()
-                    .flex_wrap()
-                    .gap_3()
-                    .p_4()
-                    .child(
-                        h_flex()
-                            .flex_1()
-                            .min_w(px(180.))
-                            .gap_3()
-                            .child(
-                                h_flex()
-                                    .justify_center()
-                                    .flex_shrink_0()
-                                    .size(px(40.))
-                                    .rounded_lg()
-                                    .bg(accent.opacity(0.12))
-                                    .child(Icon::new(Lucide::FileText).text_color(accent)),
-                            )
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .font_semibold()
-                                    .truncate()
-                                    .child(filename.into_owned()),
-                            ),
-                    )
-                    .child(actions),
-            )
-            .when_some(encoding, |card, encoding| {
-                card.child(
-                    div()
-                        .px_4()
-                        .pb_3()
-                        .text_sm()
-                        .text_color(theme.muted_foreground)
-                        .child(t!("files.encoding", encoding = encoding).into_owned()),
-                )
-            })
-            .when(busy, |card| {
-                let (done, total) = self.files.progress.unwrap_or_default();
-                let percent = done.saturating_mul(100).checked_div(total).unwrap_or(0);
-                let label = if total == 0 {
-                    t!("files.starting")
-                } else {
-                    t!("files.progress", percent = percent)
-                };
-                card.child(
-                    v_flex()
-                        .gap_2()
-                        .px_4()
-                        .pb_4()
-                        .text_sm()
-                        .text_color(theme.muted_foreground)
-                        .child(label.into_owned())
-                        .child(
-                            Progress::new("file-progress")
-                                .accessibility_label(t!("files.progress_label").into_owned())
-                                .color(accent)
-                                .loading(total == 0 || (total == 1 && done == 0))
-                                .value(percent as f32),
-                        ),
-                )
-            })
-            .when_some(completed, |card, result| {
-                card.child(self.render_file_result(result, cx))
-            })
-            .into_any_element()
-    }
-
-    fn save_file_button(&self, cx: &Context<Self>) -> Button {
-        Button::new("save-file")
-            .label(t!("files.save").into_owned())
-            .disabled(self.files.io_busy)
-            .on_click(cx.listener(|this, _, _, cx| this.save_file(cx)))
-    }
-
-    fn render_file_result(&self, result: &CompletedFile, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme();
-        let saved = self.files.saved.as_ref();
-        let status = if !result.has_changes {
-            t!("files.no_changes")
-        } else if saved.is_some() {
-            t!("files.saved")
-        } else {
-            t!("files.done")
-        };
-        let review = &result.review;
-        let muted = theme.muted_foreground;
+    fn render_file_review(&self, review: &FileReview, cx: &Context<Self>) -> AnyElement {
         let guidance = [
+            review
+                .partial_translation
+                .then(|| t!("files.partial_translation")),
             Some(t!("files.machine_translation")),
             review.update_toc.then(|| t!("files.update_toc")),
             review.check_slides.then(|| t!("files.check_slides")),
             review.check_word.then(|| t!("files.check_word")),
         ];
-        v_flex()
-            .gap_2()
-            .border_t_1()
-            .border_color(theme.border)
+        div()
+            .id("file-review-list")
+            .max_h(scaled(240.))
+            .overflow_y_scroll()
             .px_4()
             .py_3()
             .child(
-                h_flex()
-                    .flex_wrap()
-                    .justify_between()
-                    .gap_2()
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .text_sm()
-                            .font_medium()
-                            .when(result.has_changes, |row| {
-                                row.child(Icon::new(IconName::Check).text_color(theme.primary))
-                            })
-                            .child(status.into_owned()),
-                    )
-                    .when_some(saved.cloned(), |row, path| {
-                        row.child(
-                            h_flex()
-                                .flex_wrap()
-                                .gap_2()
-                                .child(self.save_file_button(cx).small().ghost())
-                                .child(
-                                    Button::new("reveal-file")
-                                        .small()
-                                        .ghost()
-                                        .icon(Lucide::FolderOpen)
-                                        .label(t!("files.reveal").into_owned())
-                                        .on_click(move |_, _, cx| cx.reveal_path(&path)),
-                                ),
-                        )
-                    }),
-            )
-            .when(result.has_changes && review.partial_translation, |panel| {
-                panel.child(
-                    div()
-                        .text_sm()
-                        .text_color(muted)
-                        .child(t!("files.partial_translation").into_owned()),
-                )
-            })
-            .when(
-                result.has_changes || !review.locations.is_empty(),
-                |panel| {
-                    panel
-                        .child(
-                            Button::new("file-review-locations")
-                                .small()
-                                .ghost()
-                                .label(
-                                    t!(if self.files.show_review {
-                                        "files.hide_review"
-                                    } else {
-                                        "files.show_review"
-                                    })
-                                    .into_owned(),
-                                )
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.files.show_review = !this.files.show_review;
-                                    cx.notify();
-                                })),
-                        )
-                        .when(self.files.show_review, |panel| {
-                            panel.child(
-                                div()
-                                    .id("file-review-list")
-                                    .max_h(scaled(240.))
-                                    .overflow_y_scroll()
-                                    .child(
-                                        v_flex()
-                                            .gap_1()
-                                            .when(result.has_changes, |details| {
-                                                details.children(
-                                                    guidance.into_iter().flatten().map(|line| {
-                                                        div()
-                                                            .text_sm()
-                                                            .text_color(muted)
-                                                            .child(line.into_owned())
-                                                    }),
-                                                )
-                                            })
-                                            .children(
-                                                review.locations.iter().map(|line| {
-                                                    div().text_sm().child(line.clone())
-                                                }),
-                                            ),
-                                    ),
-                            )
-                        })
-                },
+                v_flex()
+                    .gap_1()
+                    .text_sm()
+                    .children(guidance.into_iter().flatten().map(|line| {
+                        div()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(line.into_owned())
+                    }))
+                    .children(
+                        review
+                            .locations
+                            .iter()
+                            .map(|line| div().child(line.clone())),
+                    ),
             )
             .into_any_element()
     }

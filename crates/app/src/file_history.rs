@@ -6,12 +6,24 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Default, Deserialize, Serialize)]
+pub(crate) struct FileReview {
+    pub needs_review: bool,
+    pub partial_translation: bool,
+    pub update_toc: bool,
+    pub check_slides: bool,
+    pub check_word: bool,
+    pub locations: Vec<String>,
+}
+
 #[derive(Deserialize, Serialize)]
 struct Metadata {
     filename: String,
     target: String,
     extension: String,
     created: i64,
+    #[serde(default)]
+    review: Option<FileReview>,
 }
 
 pub(crate) struct Entry {
@@ -22,6 +34,10 @@ pub(crate) struct Entry {
 impl Entry {
     pub fn filename(&self) -> &str {
         &self.metadata.filename
+    }
+
+    pub fn review(&self) -> Option<&FileReview> {
+        self.metadata.review.as_ref()
     }
 
     pub fn target(&self) -> &str {
@@ -106,6 +122,7 @@ pub(crate) fn record(
     target: String,
     extension: &str,
     bytes: &[u8],
+    review: FileReview,
 ) -> io::Result<Entry> {
     fs::create_dir_all(root)?;
     let dir = tempfile::Builder::new()
@@ -121,6 +138,7 @@ pub(crate) fn record(
                 .into_owned(),
             target,
             extension: extension.to_owned(),
+            review: Some(review),
             created: Utc::now().timestamp_micros(),
         },
     )?;
@@ -161,8 +179,24 @@ mod tests {
     fn same_named_results_survive_reloading_without_the_original() {
         let root = tempfile::tempdir().unwrap();
         let source = Path::new("example.txt");
-        let first = record(root.path(), source, "ja".into(), "txt", b"first").unwrap();
-        let second = record(root.path(), source, "en".into(), "txt", b"second").unwrap();
+        let first = record(
+            root.path(),
+            source,
+            "ja".into(),
+            "txt",
+            b"first",
+            FileReview::default(),
+        )
+        .unwrap();
+        let second = record(
+            root.path(),
+            source,
+            "en".into(),
+            "txt",
+            b"second",
+            FileReview::default(),
+        )
+        .unwrap();
         let entries = load(root.path()).unwrap();
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].output, second.output);
@@ -172,12 +206,49 @@ mod tests {
     }
 
     #[test]
+    fn review_survives_restart_and_older_entries_still_open() {
+        let root = tempfile::tempdir().unwrap();
+        let entry = record(
+            root.path(),
+            Path::new("report.txt"),
+            "en".into(),
+            "txt",
+            b"result",
+            FileReview {
+                needs_review: true,
+                locations: vec!["Line 3".into()],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let entries = load(root.path()).unwrap();
+        let review = entries[0].review().unwrap();
+        assert!(review.needs_review);
+        assert_eq!(review.locations, ["Line 3"]);
+        let metadata_path = entry.output.parent().unwrap().join("entry.json");
+        let mut metadata = serde_json::to_value(&entry.metadata).unwrap();
+        metadata.as_object_mut().unwrap().remove("review");
+        fs::write(metadata_path, serde_json::to_vec(&metadata).unwrap()).unwrap();
+        let entries = load(root.path()).unwrap();
+        assert!(entries[0].review().is_none());
+        assert_eq!(entries[0].output, entry.output);
+    }
+
+    #[test]
     fn history_removal_preserves_the_source_and_exported_copy() {
         let root = tempfile::tempdir().unwrap();
         let source = root.path().join("example.txt");
         let exported = root.path().join("example.en.txt");
         fs::write(&source, b"source").unwrap();
-        let entry = record(root.path(), &source, "en".into(), "txt", b"result").unwrap();
+        let entry = record(
+            root.path(),
+            &source,
+            "en".into(),
+            "txt",
+            b"result",
+            FileReview::default(),
+        )
+        .unwrap();
         assert_eq!(entry.export_name(), "example.en.txt");
         fs::copy(&entry.output, &exported).unwrap();
         remove(&entry.output).unwrap();
@@ -196,6 +267,7 @@ mod tests {
             "en".into(),
             "txt",
             b"result",
+            FileReview::default(),
         )
         .unwrap();
         let dir = entry.output.parent().unwrap();
