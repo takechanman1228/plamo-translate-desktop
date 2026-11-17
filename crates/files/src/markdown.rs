@@ -71,10 +71,10 @@ impl Segment {
     }
 
     pub fn valid(&self, text: &str) -> bool {
-        self.restore(text).is_some()
+        self.restore(text, Escaping::Full).is_some()
     }
 
-    fn restore(&self, text: &str) -> Option<String> {
+    fn restore(&self, text: &str, escaping: Escaping) -> Option<String> {
         if text.trim().is_empty() {
             return None;
         }
@@ -88,7 +88,7 @@ impl Segment {
             if gap.contains("<a i=") || gap.contains("</a>") {
                 return None;
             }
-            escape(gap, &mut out);
+            escape(gap, &mut out, escaping);
             if let Some(n) = m.get(1).or_else(|| m.get(2)) {
                 let index = n.as_str().parse::<usize>().ok()?.checked_sub(1)?;
                 if *used.get(index)? || open.is_some() {
@@ -135,7 +135,7 @@ impl Segment {
         {
             return None;
         }
-        escape(remainder, &mut out);
+        escape(remainder, &mut out, escaping);
         Some(out)
     }
 }
@@ -382,16 +382,22 @@ impl Markdown {
         let mut warnings = self.retained.clone();
         let mut changes = Vec::new();
         for (segment, target) in self.segments.iter().zip(targets) {
-            let replacement = target
+            let unchanged = |replacement: &String| replacement == &source[segment.range.clone()];
+            let target = target
                 .as_deref()
                 .map(str::trim)
-                .filter(|target| *target != segment.text)
-                .and_then(|target| segment.restore(target))
-                .filter(|replacement| replacement != &source[segment.range.clone()]);
-            if let Some(replacement) = replacement {
+                .filter(|target| *target != segment.text);
+            let readable = target
+                .and_then(|target| segment.restore(target, Escaping::Readable))
+                .filter(|replacement| !unchanged(replacement));
+            let escaped = target
+                .and_then(|target| segment.restore(target, Escaping::Full))
+                .filter(|replacement| !unchanged(replacement));
+            if let (Some(replacement), Some(escaped)) = (readable, escaped) {
                 changes.push(Change {
                     segment,
                     replacement,
+                    escaped,
                 });
             } else {
                 warnings.push(segment.line);
@@ -402,13 +408,15 @@ impl Markdown {
         if !same_structure(source, &output) {
             accepted.fill(false);
             let mut budget = (64 * 1024 * 1024).max(source.len().saturating_mul(8));
-            retain_valid(
-                source,
-                &changes,
-                &mut accepted,
-                0..changes.len(),
-                &mut budget,
-            );
+            let all: Vec<_> = (0..changes.len()).collect();
+            retain_valid(source, &changes, &mut accepted, &all, &mut budget);
+            // Punctuation left readable changed the parse here: use the fully escaped spelling.
+            let rejected: Vec<_> = (0..changes.len()).filter(|&i| !accepted[i]).collect();
+            for &index in &rejected {
+                let change = &mut changes[index];
+                change.replacement = std::mem::take(&mut change.escaped);
+            }
+            retain_valid(source, &changes, &mut accepted, &rejected, &mut budget);
             output = render(source, &changes, &accepted);
         }
         let translated = accepted.iter().filter(|keep| **keep).count();
@@ -435,6 +443,17 @@ impl Markdown {
 struct Change<'a> {
     segment: &'a Segment,
     replacement: String,
+    /// The same text with every Markdown-significant character escaped.
+    escaped: String,
+}
+
+/// How much punctuation of a translation is written as numeric entities.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Escaping {
+    /// Leave characters that cannot start syntax where they stand (`max_tokens`, `Q&A`, `~$5`).
+    Readable,
+    /// Escape every character Markdown can give a meaning.
+    Full,
 }
 
 fn render(source: &str, changes: &[Change<'_>], accepted: &[bool]) -> String {
@@ -451,29 +470,33 @@ fn render(source: &str, changes: &[Change<'_>], accepted: &[bool]) -> String {
     output
 }
 
-/// Try related changes in batches and narrow rejected batches to a single
+/// Try the `candidates` in batches and narrow rejected batches to a single
 /// paragraph when needed. Compare the whole parse so neighboring list and
 /// reference-definition boundaries are checked as well.
 fn retain_valid(
     source: &str,
     changes: &[Change<'_>],
     accepted: &mut [bool],
-    range: Range<usize>,
+    candidates: &[usize],
     budget: &mut usize,
 ) {
-    if range.is_empty() || *budget < source.len() {
+    if candidates.is_empty() || *budget < source.len() {
         return;
     }
     *budget -= source.len();
-    accepted[range.clone()].fill(true);
+    for &index in candidates {
+        accepted[index] = true;
+    }
     if same_structure(source, &render(source, changes, accepted)) {
         return;
     }
-    accepted[range.clone()].fill(false);
-    if range.len() > 1 {
-        let middle = range.start + range.len() / 2;
-        retain_valid(source, changes, accepted, range.start..middle, budget);
-        retain_valid(source, changes, accepted, middle..range.end, budget);
+    for &index in candidates {
+        accepted[index] = false;
+    }
+    if candidates.len() > 1 {
+        let (left, right) = candidates.split_at(candidates.len() / 2);
+        retain_valid(source, changes, accepted, left, budget);
+        retain_valid(source, changes, accepted, right, budget);
     }
 }
 
@@ -535,17 +558,48 @@ fn assemble(group: &[Fragment], source: &str, line: usize) -> Option<Segment> {
     })
 }
 
-fn escape(text: &str, out: &mut String) {
+fn escape(text: &str, out: &mut String, escaping: Escaping) {
     let mut chars = text.chars().peekable();
     while let Some(ch) = chars.next() {
+        let next = chars.peek().copied();
+        let previous = out.chars().next_back();
+        let at_start = out.trim().is_empty();
+        // Where a character cannot open or close syntax it stays readable. `Markdown::write`
+        // compares the whole parse afterwards and falls back to `Escaping::Full`.
+        let harmless = escaping == Escaping::Readable
+            && match ch {
+                // Intraword underscores never delimit emphasis.
+                '_' => {
+                    previous.is_some_and(char::is_alphanumeric)
+                        && next.is_some_and(char::is_alphanumeric)
+                }
+                // Not the start of an entity or character reference.
+                '&' => {
+                    let mut rest = chars
+                        .clone()
+                        .skip_while(|c| c.is_ascii_alphanumeric() || *c == '#');
+                    rest.next() != Some(';')
+                }
+                // A setext underline or a block quote needs the start of the line.
+                '=' | '>' => !at_start,
+                // An opening tag, comment or autolink needs a name after the bracket.
+                '<' => {
+                    !next.is_some_and(|c| c.is_ascii_alphabetic() || matches!(c, '/' | '!' | '?'))
+                }
+                // Strikethrough cannot close after whitespace; a lone opener is literal.
+                '~' => previous.is_none_or(char::is_whitespace) && next != Some('~'),
+                '$' => next.is_some_and(|c| c.is_ascii_digit()),
+                // Only a footnote label gives it a meaning, and brackets are always escaped.
+                '^' => true,
+                _ => false,
+            };
         match ch {
+            _ if harmless => out.push(ch),
             // A plus sign only starts a list at the beginning of a line, before
             // whitespace. Leave C++, arithmetic and ordinary punctuation readable.
-            '+' if !(out.trim().is_empty() && chars.peek().is_some_and(|c| c.is_whitespace())) => {
-                out.push(ch)
-            }
-            '!' if chars.peek() != Some(&'[') => out.push(ch),
-            '#' if !out.trim().is_empty() => out.push(ch),
+            '+' if !(at_start && next.is_some_and(char::is_whitespace)) => out.push(ch),
+            '!' if next != Some('[') => out.push(ch),
+            '#' if !at_start => out.push(ch),
             '\r' | '\n' | '\t' => out.push(' '),
             // Entities cannot be reinterpreted as Markdown punctuation after decoding.
             '<' | '>' | '&' | '*' | '_' | '\\' | '`' | '|' | '[' | ']' | '$' | '~' | '#' | '!'
@@ -706,6 +760,31 @@ mod tests {
                     && !text.contains("触らない")
                     && !text.contains("コード"))
         );
+    }
+
+    #[test]
+    fn harmless_punctuation_stays_readable_and_risky_text_falls_back_to_entities() {
+        let source = "# 設定\n\n説明です。\n\n- 項目 `code` の説明\n\n最後の段落。\n";
+        let md = Markdown::parse(Document::open(source.as_bytes(), "a.md").unwrap());
+        let export = md
+            .write(&[
+                Some("Settings (R&D)".into()),
+                Some("Set max_tokens = 5 for Q&A, costs ~$5, <5 ms, a > b, x^2.".into()),
+                Some("Description of <a i=\"1\"/> (see file_name.txt)".into()),
+                // Two dollar signs would pair up as inline math if both were left raw.
+                Some("Pay $5 or US$10 &amp; _more_.".into()),
+            ])
+            .unwrap();
+        let output = String::from_utf8(export.bytes).unwrap();
+        assert_eq!(
+            output,
+            "# Settings (R&D)\n\nSet max_tokens = 5 for Q&A, costs ~$5, <5 ms, a > b, x^2.\n\n\
+             - Description of `code` (see file_name.txt)\n\n\
+             Pay &#36;5 or US&#36;10 &#38;amp; &#95;more&#95;.\n"
+        );
+        assert!(export.retained_lines.is_empty());
+        assert_eq!(export.translated, 4);
+        assert!(same_structure(source, &output));
     }
 
     #[test]
