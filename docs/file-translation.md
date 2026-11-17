@@ -30,7 +30,7 @@ it is not a measure of translation accuracy. An unchanged or wholly rejected
 result cannot be saved. Cancellation discards the unfinished result. Completed translations with changed content appear in **Translated files**, newest first.
 Click a filename to open its translated document in the system viewer. Copies are kept in
 the application's local data directory across restarts, including when the original file
-has moved. **Save as** exports a separate copy. If writing the history copy fails, the
+has moved. **Save as** exports a separate copy, starting in Downloads when available. Use the delete button on a row or **Clear history…** to remove the local copies. If writing the history copy fails, the
 app warns before replacing or closing an unexported result.
 
 Word pagination, floating objects, fixed-height table rows and text boxes need

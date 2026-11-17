@@ -911,3 +911,7 @@ no-clobber persist. The source path, aliases and existing destinations are rejec
 The file-format tests run without a model on Linux, macOS and Windows in CI; the
 application integration test also checks TXT chunk recovery. See
 [file translation](file-translation.md) for supported content and limitations.
+
+## File translation history
+
+The Files tab stores the exported result and its metadata under the local application data directory in `file-history/`. Each entry is discoverable after both files are written. Removing a history entry deletes its cached result and metadata. The file picker exports a separate copy.

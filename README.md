@@ -296,6 +296,8 @@ and the NPU's compiled graphs (`openvino-cache/`) are kept in:
 - Linux: `~/.local/share/plamo-translate-desktop` (`$XDG_DATA_HOME`)
 - macOS: `~/Library/Application Support/plamo-translate-desktop`
 
+The Files tab stores copies of completed file translations in the local application data directory under `file-history/`. Use the delete button on a history row or **Clear history…** to remove the stored copies.
+
 The log records start-up, detected devices, model loads, downloads, deletions, settings changes, and where long texts were retried or cut, but never translated text.
 A log larger than 1 MiB is moved to `app.log.1` at start-up.
 

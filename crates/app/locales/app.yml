@@ -706,6 +706,30 @@ files.history_completed:
   en: "Completed"
   ja: "完了日時"
 
+files.history_exported:
+  en: "Saved to %{path}"
+  ja: "%{path} に保存しました"
+
+files.history_missing:
+  en: "The saved translation could not be found."
+  ja: "保存された訳文が見つかりませんでした。"
+
+files.history_delete_title:
+  en: "Delete saved file translations?"
+  ja: "保存された訳文を履歴から削除しますか？"
+
+files.history_delete_body:
+  en: "Remove %{count} result(s) from local history. Exported copies are kept."
+  ja: "ローカル履歴から %{count} 件の訳文を削除します。書き出したコピーは残ります。"
+
+files.history_delete:
+  en: "Delete"
+  ja: "削除"
+
+files.history_clear:
+  en: "Clear history…"
+  ja: "履歴を消去…"
+
 files.history_failed:
   en: "Could not keep this result in history. Use Save as… to keep a copy. %{error}"
   ja: "履歴に保存できませんでした。「名前を付けて保存」で訳文を保存できます。%{error}"

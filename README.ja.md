@@ -285,6 +285,8 @@ NPU 向けにコンパイルしたグラフ（`openvino-cache/`）は次の場�
 - Linux: `~/.local/share/plamo-translate-desktop`（`$XDG_DATA_HOME`）
 - macOS: `~/Library/Application Support/plamo-translate-desktop`
 
+ファイルタブでは、翻訳済みファイルのコピーをアプリデータの `file-history/` に保存します。各行の削除ボタンや **履歴を消去…** から、保存済みのコピーを削除できます。
+
 ログには、起動、検出したデバイス、モデルの読み込み、ダウンロード、削除、設定の変更、長い文章のやり直しや打ち切りの位置を記録します。翻訳した文章は記録しません。
 起動時に 1 MiB を超えていたら `app.log.1` に退避します。
 

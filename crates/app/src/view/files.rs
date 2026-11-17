@@ -320,13 +320,14 @@ pub(super) struct FilePanel {
     pub(super) message: Option<String>,
     saved: Option<PathBuf>,
     show_review: bool,
-    archived: bool,
+    archived: Option<PathBuf>,
+    history_status: Option<String>,
 }
 
 impl FilePanel {
     /// A finished translation that exists only in memory.
     fn unsaved(&self) -> bool {
-        !self.archived
+        self.archived.as_ref().is_none_or(|path| !path.is_file())
             && self.saved.is_none()
             && self.completed.as_ref().is_some_and(|c| c.has_changes)
     }
@@ -522,7 +523,7 @@ impl TranslatorView {
         self.files.cancelling = false;
         self.files.message = None;
         self.files.saved = None;
-        self.files.archived = false;
+        self.files.archived = None;
         self.files.target = request.options.target.as_str().to_owned();
         let job = match document {
             FileDocument::Text(_) => self
@@ -827,7 +828,7 @@ impl TranslatorView {
                 this.files.io_busy = false;
                 match result {
                     Ok(entry) => {
-                        this.files.archived = true;
+                        this.files.archived = Some(entry.output.clone());
                         this.file_history.retain(|old| old.output != entry.output);
                         this.file_history.insert(0, entry);
                     }
@@ -901,10 +902,6 @@ impl TranslatorView {
         .detach();
     }
 
-    pub(super) fn showing_file_history(&self) -> bool {
-        self.files.loaded.is_none() && !self.file_history.is_empty()
-    }
-
     pub(super) fn render_files(&self, cx: &mut Context<Self>) -> AnyElement {
         let content = match &self.files.loaded {
             Some((path, document)) => self.render_loaded_file(path, document, cx),
@@ -927,6 +924,14 @@ impl TranslatorView {
                     .child(content)
                     .when(!self.file_history.is_empty(), |panel| {
                         panel.child(self.render_file_history(cx))
+                    })
+                    .when_some(self.files.history_status.clone(), |panel, message| {
+                        panel.child(
+                            div()
+                                .text_sm()
+                                .text_color(theme.muted_foreground)
+                                .child(message),
+                        )
                     })
                     .when(self.files.io_busy, |panel| {
                         panel.child(
@@ -957,34 +962,121 @@ impl TranslatorView {
             .into_any_element()
     }
 
-    fn export_history_file(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+    fn export_history_file(&mut self, path: PathBuf, suggested: &str, cx: &mut Context<Self>) {
         if self.file_operation_busy() {
             return;
         }
-        let picker = cx.prompt_for_new_path(
-            Path::new("."),
-            path.file_name().and_then(|name| name.to_str()),
-        );
+        let picker = cx.prompt_for_new_path(&appdata::settings::file_export_dir(), Some(suggested));
         self.files.io_busy = true;
+        self.files.history_status = None;
         cx.notify();
         cx.spawn(async move |this, cx| {
             let result = match picker.await {
                 Ok(Ok(Some(destination))) => {
                     cx.background_spawn(async move {
-                        ::files::save_new(&path, &destination, &std::fs::read(&path)?)
+                        ::files::save_new(&path, &destination, &std::fs::read(&path)?)?;
+                        Ok::<_, ::files::FileError>(Some(destination))
                     })
                     .await
                 }
                 Ok(Err(error)) => Err(::files::FileError::Io(std::io::Error::other(
                     error.to_string(),
                 ))),
-                _ => Ok(()),
+                _ => Ok(None),
             };
             let _ = this.update(cx, |this, cx| {
                 this.files.io_busy = false;
-                if let Err(error) = result {
-                    this.files.message =
-                        Some(t!("files.error", error = error.to_string()).into_owned());
+                match result {
+                    Ok(Some(destination)) => {
+                        this.files.message = None;
+                        this.files.history_status = Some(
+                            t!(
+                                "files.history_exported",
+                                path = destination.display().to_string()
+                            )
+                            .into_owned(),
+                        );
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        this.files.message =
+                            Some(t!("files.error", error = error.to_string()).into_owned())
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn confirm_remove_history(
+        &mut self,
+        paths: Vec<PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.file_operation_busy() || paths.is_empty() || window.has_active_dialog(cx) {
+            return;
+        }
+        let view = cx.entity().downgrade();
+        window.open_dialog(cx, move |dialog, _, _| {
+            let view = view.clone();
+            let paths = paths.clone();
+            dialog
+                .title(t!("files.history_delete_title").into_owned())
+                .child(t!("files.history_delete_body", count = paths.len()).into_owned())
+                .footer(
+                    h_flex()
+                        .gap_2()
+                        .child(
+                            Button::new("cancel-history-delete")
+                                .label(t!("files.discard_keep").into_owned())
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                        )
+                        .child(
+                            Button::new("confirm-history-delete")
+                                .danger()
+                                .label(t!("files.history_delete").into_owned())
+                                .on_click(move |_, window, cx| {
+                                    window.close_dialog(cx);
+                                    let _ = view.update(cx, |this, cx| {
+                                        this.remove_history(paths.clone(), cx)
+                                    });
+                                }),
+                        ),
+                )
+        });
+    }
+
+    fn remove_history(&mut self, paths: Vec<PathBuf>, cx: &mut Context<Self>) {
+        if self.file_operation_busy() {
+            return;
+        }
+        self.files.io_busy = true;
+        self.files.history_status = None;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let results = cx
+                .background_spawn(async move {
+                    paths
+                        .into_iter()
+                        .map(|path| {
+                            let result = crate::file_history::remove(&path);
+                            (path, result)
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.files.io_busy = false;
+                for (path, result) in results {
+                    match result {
+                        Ok(()) => this.file_history.retain(|entry| entry.output != path),
+                        Err(error) => {
+                            this.files.message =
+                                Some(t!("files.error", error = error.to_string()).into_owned())
+                        }
+                    }
                 }
                 cx.notify();
             });
@@ -1002,9 +1094,18 @@ impl TranslatorView {
                 .icon(Lucide::Download)
                 .label(t!("files.save").into_owned())
         };
+        let remove_button = |id: ElementId| {
+            Button::new(id)
+                .small()
+                .ghost()
+                .flex_none()
+                .label(t!("files.history_delete").into_owned())
+        };
         let rows = self.file_history.iter().enumerate().map(|(index, entry)| {
             let path = entry.output.clone();
             let export = path.clone();
+            let remove = path.clone();
+            let suggested = entry.export_name();
             h_flex()
                 .gap_3()
                 .border_t_1()
@@ -1021,7 +1122,19 @@ impl TranslatorView {
                             .icon(Lucide::FileText)
                             .label(entry.filename().to_owned())
                             .tooltip(t!("files.open_saved").into_owned())
-                            .on_click(move |_, _, cx| cx.open_with_system(&path)),
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if path
+                                    .symlink_metadata()
+                                    .is_ok_and(|metadata| metadata.is_file())
+                                {
+                                    cx.open_with_system(&path);
+                                } else {
+                                    this.file_history.retain(|entry| entry.output != path);
+                                    this.files.message =
+                                        Some(t!("files.history_missing").into_owned());
+                                    cx.notify();
+                                }
+                            })),
                     ),
                 )
                 .child(
@@ -1041,7 +1154,14 @@ impl TranslatorView {
                     export_button(("history-export", index).into())
                         .disabled(self.file_operation_busy())
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.export_history_file(export.clone(), cx)
+                            this.export_history_file(export.clone(), &suggested, cx)
+                        })),
+                )
+                .child(
+                    remove_button(("history-remove", index).into())
+                        .disabled(self.file_operation_busy())
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.confirm_remove_history(vec![remove.clone()], window, cx)
                         })),
                 )
         });
@@ -1058,6 +1178,24 @@ impl TranslatorView {
                     .text_sm()
                     .text_color(theme.muted_foreground)
                     .child(self.file_history.len().to_string()),
+            )
+            .child(div().flex_1())
+            .child(
+                Button::new("history-clear")
+                    .small()
+                    .ghost()
+                    .label(t!("files.history_clear").into_owned())
+                    .disabled(self.file_operation_busy())
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.confirm_remove_history(
+                            this.file_history
+                                .iter()
+                                .map(|entry| entry.output.clone())
+                                .collect(),
+                            window,
+                            cx,
+                        );
+                    })),
             );
         let columns = h_flex()
             .gap_3()
@@ -1085,6 +1223,13 @@ impl TranslatorView {
             .child(
                 div().invisible().flex_none().h_0().overflow_hidden().child(
                     export_button("history-action-width".into())
+                        .role(None)
+                        .disabled(true),
+                ),
+            )
+            .child(
+                div().invisible().h_0().overflow_hidden().child(
+                    remove_button("history-remove-width".into())
                         .role(None)
                         .disabled(true),
                 ),
