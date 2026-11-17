@@ -102,15 +102,26 @@ fn japanese(text: &str) -> Vec<(u128, bool)> {
         .collect()
 }
 
-fn english(text: &str) -> Vec<(u128, bool)> {
-    ENGLISH_AMOUNT
+static RANGE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)^\s*(?:to|and|or|through|[-–—~〜～])\s*$").unwrap());
+
+static ENGLISH_MARKER: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\byen\b|\bJPY\b|[¥￥]").unwrap());
+
+/// Yen amounts and whether a currency marker remains whose amount could not be read
+/// ("one million yen", "¥1M").
+fn english(text: &str) -> (Vec<(u128, bool)>, bool) {
+    struct Found {
+        range: Range<usize>,
+        marked: bool,
+        amount: Option<(u128, bool)>,
+    }
+    let mut found: Vec<Found> = ENGLISH_AMOUNT
         .captures_iter(text)
-        .filter_map(|amount| {
-            if amount.name("prefix").is_none() && amount.name("suffix").is_none() {
-                return None;
-            }
+        .map(|amount| {
+            let range = amount.get(0).expect("whole match").range();
             let mut scaled = false;
-            let mut total = 0u128;
+            let mut total = Some(0u128);
             for term in ENGLISH_TERM.captures_iter(&amount["value"]) {
                 let scale = term.get(2);
                 scaled |= scale.is_some();
@@ -121,18 +132,58 @@ fn english(text: &str) -> Vec<(u128, bool)> {
                     Some("thousand" | "thousands") => 1_000,
                     _ => 1,
                 };
-                total = total.checked_add(decimal(&term[1])?.checked_mul(factor)?)?;
+                total = total
+                    .and_then(|total| total.checked_add(decimal(&term[1])?.checked_mul(factor)?));
             }
-            Some((total, scaled))
+            // "1M" or "5k": an abbreviation this parser does not read.
+            let abbreviated = amount.name("suffix").is_none()
+                && text[range.end..]
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_alphabetic());
+            Found {
+                marked: amount.name("prefix").is_some() || amount.name("suffix").is_some(),
+                amount: total.filter(|_| !abbreviated).map(|total| (total, scaled)),
+                range,
+            }
         })
-        .collect()
+        .collect();
+    // A range states its currency once: "30,000 to 50,000 yen", "¥30,000–50,000".
+    for i in 1..found.len() {
+        let joined = RANGE.is_match(&text[found[i - 1].range.end..found[i].range.start]);
+        if joined && found[i - 1].marked && !found[i].marked {
+            found[i].marked = true;
+        }
+    }
+    for i in (1..found.len()).rev() {
+        let joined = RANGE.is_match(&text[found[i - 1].range.end..found[i].range.start]);
+        if joined && found[i].marked && !found[i - 1].marked {
+            found[i - 1].marked = true;
+        }
+    }
+    let amounts: Vec<_> = found
+        .iter()
+        .filter(|found| found.marked)
+        .filter_map(|found| found.amount)
+        .collect();
+    let unread = ENGLISH_MARKER.find_iter(text).count() > amounts.len();
+    (amounts, unread)
 }
 
 /// Explicit scaled yen amounts must survive a Japanese/English translation as exact values.
+/// A translation whose amounts cannot be read at all (spelled-out or abbreviated numbers) is
+/// left to the reviewer rather than rejected.
 pub(crate) fn matches(source: &str, target: &str, language: &str) -> bool {
-    let (source, target) = match language {
-        "en" => (japanese(source), english(target)),
-        "ja" => (english(source), japanese(target)),
+    let (source, target, unread) = match language {
+        "en" => {
+            let (target, unread) = english(target);
+            (japanese(source), target, unread)
+        }
+        "ja" => {
+            let target_amounts = japanese(target);
+            let unread = target.matches('円').count() > target_amounts.len();
+            (english(source).0, target_amounts, unread)
+        }
         _ => return true,
     };
     if !source.iter().any(|&(_, scaled)| scaled) {
@@ -143,5 +194,24 @@ pub(crate) fn matches(source: &str, target: &str, language: &str) -> bool {
         values.sort_unstable();
         values
     };
-    sorted_values(source) == sorted_values(target)
+    sorted_values(source) == sorted_values(target) || unread
+}
+
+#[cfg(test)]
+mod tests {
+    use super::matches;
+
+    #[test]
+    fn ranges_share_one_currency_marker_and_unread_amounts_are_not_rejected() {
+        let range = "価格は3万円から5万円です。";
+        assert!(matches(range, "The price is 30,000 to 50,000 yen.", "en"));
+        assert!(matches(range, "The price is ¥30,000–50,000.", "en"));
+        assert!(!matches(range, "The price is 30,000 to 500,000 yen.", "en"));
+        assert!(matches("30,000 to 50,000 yen", "3万円から5万円", "ja"));
+        let budget = "予算は100万円です。";
+        assert!(matches(budget, "The budget is one million yen.", "en"));
+        assert!(matches(budget, "The budget is ¥1M.", "en"));
+        assert!(!matches(budget, "The budget is 100 million yen.", "en"));
+        assert!(!matches(budget, "The budget is 1 million.", "en"));
+    }
 }
