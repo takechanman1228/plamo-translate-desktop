@@ -1963,6 +1963,7 @@ impl TranslatorView {
             // Output of superseded jobs.
             Event::Chunk { .. }
             | Event::Token { .. }
+            | Event::Unit { .. }
             | Event::Segment { .. }
             | Event::Rewind { .. }
             | Event::Retry { .. }
