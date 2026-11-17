@@ -6,7 +6,20 @@ use engine::document::DocumentOptions;
 use serde::{Deserialize, Serialize};
 
 fn project_dirs() -> Option<directories::ProjectDirs> {
-    directories::ProjectDirs::from("", "", "plamo-translate-desktop")
+    directories::ProjectDirs::from(
+        "",
+        "",
+        if local_preview() {
+            "plamo-translate-desktop-preview"
+        } else {
+            "plamo-translate-desktop"
+        },
+    )
+}
+
+/// Opt-in local testing profile: separate settings, logs and single-instance lock.
+pub fn local_preview() -> bool {
+    std::env::var_os("PLAMO_LOCAL_PREVIEW").is_some_and(|value| value == "1")
 }
 
 /// The data directory: the default models folder, caches and logs.

@@ -2,6 +2,13 @@
 
 All notable changes to PLaMo Translate Desktop. Each release's section here also becomes its release notes on GitHub.
 
+## Unreleased (local preview)
+
+- The desktop **Files** tab translates TXT, Markdown, PowerPoint, Word, and text-layer PDF
+  files using the installed model. It reports places that need review and saves to a new file.
+- PDF export inserts translation pages after their source pages. This requires PDFium and a
+  Japanese-capable TrueType font in the local preview.
+
 ## [0.6.0] - 2026-11-13
 
 ### Added

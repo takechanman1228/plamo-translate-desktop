@@ -15,6 +15,7 @@ repository.workspace = true
 rocm = ["engine/rocm"]
 
 [dependencies]
+files = { path = "../files" }
 appdata.workspace = true
 desktop.workspace = true
 engine.workspace = true

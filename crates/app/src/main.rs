@@ -9,6 +9,7 @@ mod align;
 mod assets;
 mod backend;
 mod browser;
+mod jobs;
 mod lang;
 mod models;
 mod shell;
@@ -72,7 +73,12 @@ fn main() {
         app_log!("panic: {info}");
         default_hook(info);
     }));
-    let settings = settings::Settings::load();
+    let mut settings = settings::Settings::load();
+    if settings::local_preview() {
+        settings.check_updates = false;
+        settings.double_copy = false;
+        settings.resident = false;
+    }
     app_log!(
         "starting {} {}; models in {}",
         env!("CARGO_PKG_NAME"),

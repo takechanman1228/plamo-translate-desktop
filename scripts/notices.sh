@@ -76,6 +76,15 @@ fi
     pdfjs
     echo
     cat licenses/lucide.txt
+    if [ -n "${PLAMO_LOCAL_PDFIUM_DIR:-}" ]; then
+        echo
+        echo "PDFium (local preview runtime) and components"
+        for notice in "$PLAMO_LOCAL_PDFIUM_DIR"/licenses/*; do
+            echo
+            echo "$(basename "$notice")"
+            cat "$notice"
+        done
+    fi
     if [ "$platform" = windows ]; then
         echo
         cat licenses/msvc-runtime.txt

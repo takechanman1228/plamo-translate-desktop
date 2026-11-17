@@ -1,5 +1,9 @@
 # PLaMo Translate Desktop
 
+> ファイル翻訳を開発中の個人フォークです。この変更は元のアプリのリリースには含まれません。
+> 試用には下記の別アプリをビルドしてください。ファイル翻訳の動作確認は macOS Apple Silicon 上で行っており、
+> Windows・Linux の受け入れ確認は未実施です。[対応範囲と制限](docs/file-translation.md)も参照してください。
+
 [English](README.md)
 
 [PLaMo 3 Translate](https://www.preferred.jp/ja/blog/tech/plamo-3-translate-weight-release) を手元のパソコンで動かす翻訳デスクトップアプリです。
@@ -40,6 +44,26 @@
   「設定」の **新しい版を確認する** で確認をオフにでき、アプリのバージョンの横の **今すぐ確認** ですぐに問い合わせることもできます。
 
 ショートカット: `Ctrl+Enter` ですぐに翻訳、`Ctrl+Shift+C` で訳文をコピー、`Ctrl+Q` で終了。macOS では `Cmd+Enter`、`Cmd+Shift+C`、`Cmd+Q` です。
+
+## ファイル翻訳（ローカル試用版）
+
+**ファイル**タブでファイルを選ぶかドロップします。翻訳方向を選んで翻訳し、要確認の箇所を見てから別名で保存します。
+モデルと PDF 用の部品がそろっていれば、オフラインで作業できます。原本と既存のファイルは上書きしません。
+
+- **TXT・Markdown:** TXT は貼り付けたときと同じ経路で翻訳します。Markdown はコード、リンク先、参照定義、冒頭のメタデータ、数式を保持します。要確認に出た行は原文と見比べてください。
+- **PowerPoint・Word:** 元の Office 形式で編集できます。訳さなかった箇所とレイアウトを確認してください。
+  Word の浮動図形、調査票の改ページ、複雑な範囲指定やテキストボックスは手直しが必要な場合があります。
+  グラフや SmartArt は原文のままです。
+- **PDF:** 原本の各ページの直後に、文字を選択できる訳文ページを挟みます。段組や単純な表を推定するため、複雑な資料では要確認です。
+  OCR、暗号化 PDF、署名済み PDF、操作可能な入力フォームの保持には対応していません。
+
+このチェックアウトでは `scripts/package-local-macos.sh` で **PLaMo Translate Local.app** を作れます。
+PDF を試すには、[検証に使った PDFium の配布物](https://github.com/bblanchon/pdfium-binaries/releases/tag/chromium%2F8165) を展開し、
+そのフォルダを `PLAMO_LOCAL_PDFIUM_DIR` に指定してからビルドします。
+フォントを同梱する場合は、変更していない `ipag.ttf`、ライセンス、README を含む IPAfont00303 フォルダを
+`PLAMO_LOCAL_IPAFONT_DIR` に指定します。代わりに `~/Library/Fonts/ipag.ttf` に IPA ゴシックを配置することもできます。
+コマンドラインからは `PLAMO_PDFIUM_LIBRARY` と `PLAMO_PDF_FONT` に絶対パスを指定できます。
+PDF の試用版は Apple Silicon で検証しています。
 
 ## モデルとライセンス
 

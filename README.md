@@ -1,5 +1,10 @@
 # PLaMo Translate Desktop
 
+> Development fork with experimental local file translation. These changes are not part of
+> the upstream release. Build the separate local app below to try them. File translation has
+> been exercised on macOS Apple Silicon; Windows and Linux acceptance is pending.
+> See [file translation status](docs/file-translation.md) for scope and limitations.
+
 [日本語](README.ja.md)
 
 A desktop translation app that runs [PLaMo 3 Translate](https://www.preferred.jp/ja/blog/tech/plamo-3-translate-weight-release)
@@ -38,6 +43,31 @@ locally on your computer. It works offline once a model is downloaded. Written i
   **Check for new versions** in Settings turns the check off; **Check now** there asks at once, next to the app's version.
 
 Shortcuts: `Ctrl+Enter` translates now. `Ctrl+Shift+C` copies the translation. `Ctrl+Q` quits. On macOS these are `Cmd+Enter`, `Cmd+Shift+C`, and `Cmd+Q`.
+
+## File translation (local preview)
+
+Open the **Files** tab, drop in a file or choose **Open file** and select a translation direction.
+Translate, check any listed passages, and save to a new name. The app works offline once the
+model and, for PDF, the local runtime are available. Existing files are never replaced.
+
+- **TXT and Markdown:** TXT uses the same translation path as pasted text. Markdown keeps code,
+  link destinations, reference definitions, front matter and math. Check any reported lines
+  where Markdown could not be preserved.
+- **PowerPoint and Word:** Edits stay in the original Office format. Check retained content and
+  the layout before sharing. Floating Word shapes, form pagination, rich ranges and text boxes
+  can need manual adjustment. Charts and SmartArt remain in the source language.
+- **PDF:** The app inserts selectable translation pages directly after each corresponding
+  original page. Column order and simple table cells are inferred; complex layouts may need
+  review. OCR, encrypted PDFs, signed PDFs and preserving interactive forms are outside this preview.
+
+For this checkout, build **PLaMo Translate Local.app** with `scripts/package-local-macos.sh`.
+The PDF preview uses the [PDFium binary tested here](https://github.com/bblanchon/pdfium-binaries/releases/tag/chromium%2F8165)
+and the IPA Gothic TrueType font. Set `PLAMO_LOCAL_PDFIUM_DIR` to the extracted distribution
+before packaging. Set `PLAMO_LOCAL_IPAFONT_DIR` to the unmodified IPAfont00303 directory
+containing `ipag.ttf`, its license and README to bundle the font and notices. Alternatively,
+install `~/Library/Fonts/ipag.ttf`, or set absolute `PLAMO_PDFIUM_LIBRARY` and `PLAMO_PDF_FONT`
+paths when running from the command line.
+The PDF-enabled package has been exercised on Apple Silicon only.
 
 ## Models and their license
 

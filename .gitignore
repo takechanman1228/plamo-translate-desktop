@@ -3,3 +3,9 @@
 /dist
 /cli
 /THIRD-PARTY-NOTICES.txt
+
+# Local verification artifacts
+.DS_Store
+*.log
+/spike/
+/downloads/

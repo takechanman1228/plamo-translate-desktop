@@ -879,3 +879,35 @@ Possible later work:
 | gpui-pre snapshots break the API often | Open: exact versions are pinned and updated deliberately |
 | Long llama.cpp + Vulkan shader builds in CI | Resolved: packages are built only in the Release workflow, with cached target directories |
 | Small models loop or skip text in long outputs | Mitigated: small chunks, loop detection, retries, and cut markers (§6.1) |
+
+## 15. Local file translation preview
+
+The Files tab uses the same model and worker as the text pane. In the app, `app/src/files.rs`
+owns the file state; `jobs.rs` guards worker ownership and defers the latest text request.
+Cancelled jobs cannot be saved. Writing uses a temporary file in the destination directory
+and a no-clobber persist. It rejects the source path, its aliases and existing destinations.
+
+| Format | Extraction and export |
+| ------ | --------------------- |
+| TXT | Decode UTF-8, BOM-marked UTF-16 or strict Shift_JIS (up to 4 MiB). Use the pasted-text path. Restore cut passages with source text and line numbers; preserve UTF-8 BOM and uniform line endings. |
+| Markdown | Use pulldown-cmark source offsets. Translate complete paragraphs, list items or table cells with inline anchors for formatting, links and protected syntax. Splice the original bytes and compare structural events and reference definitions before saving. Retain only segments that fail validation; reject saving if no translated text can be applied. |
+| PowerPoint | Rebuild selected OOXML paragraphs only, merge wrapped text in a frame, and shrink fonts conservatively within shapes and rows. Shape positions, extents, margins and fixed line spacing are not changed. Report unsupported parts and possible remaining overflow. |
+| Word | Translate eligible body, table, note, header and footer paragraphs. Preserve hyperlinks, footnote references, balanced single-paragraph fields, and supported single-run bookmark or comment ranges. Preserve cross-paragraph ranges in full, revisions and unsupported structures. Keep source bytes for unchanged ZIP entries. Pagination and floating objects require renderer review. |
+| PDF | Use PDFium locally for positioned glyphs, page import and translated output. Read sustained two-column areas column by column and preserve likely table rows and cell positions. Wrap with font metrics, paginate, and keep scan-only pages without a translation page. Flag inferred layouts and retained text. Reject encrypted files and cap size, pages and glyph count. |
+
+Structured translation shares the existing engine. Tagged units are indivisible and must
+pass validation. An invalid result is rolled back before it can enter history. Plain units use
+the existing split and recovery rules. Word and PowerPoint use anchor tags. Yen validation is shared
+by Office and PDF; it does not prove the meaning or correctness of the translation.
+
+PDF output reconstructs text on new pages; the original page content is imported into the
+new PDF. Document-level links and bookmarks, interactive form state, signatures, headers
+as metadata and other document semantics are not guaranteed. Text-layer extraction is not OCR.
+The bundled-for-preview PDFium binary is loaded from the app resources or an explicitly
+configured absolute path. The existing IPA Gothic font can render both directions. The app's
+PDF limits are 32 MiB, 100 pages, 32,000 glyphs per page and 400,000 per document.
+
+`scripts/package-local-macos.sh` builds the separate, locally signed app in `dist/`.
+`PLAMO_LOCAL_PDFIUM_DIR` adds a known PDFium distribution and its notices to that copy.
+The preview keeps separate settings, logs and an instance lock and disables automatic
+updates, clipboard double-copy and residency. The packaging script has no publishing step.
