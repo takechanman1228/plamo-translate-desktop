@@ -24,7 +24,7 @@ listed for review. This also applies to shapes with automatic sizing.
 
 ## Reviewing a result
 
-Open **Show / hide review locations** for applied/retained paragraph or line
+Open **Show review details** for applied/retained paragraph or line
 locations and layout warnings. Applied means that validated text was written;
 it is not a measure of translation accuracy. An unchanged or wholly rejected
 result cannot be saved. Cancellation discards the unfinished result. Completed translations with changed content appear in **Translated files**, newest first.

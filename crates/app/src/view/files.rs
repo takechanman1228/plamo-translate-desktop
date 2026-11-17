@@ -520,6 +520,7 @@ impl TranslatorView {
         self.files.output = ::files::Translation::default();
         self.files.completed = None;
         self.files.progress = None;
+        self.files.show_review = false;
         self.files.cancelling = false;
         self.files.message = None;
         self.files.saved = None;
@@ -625,7 +626,8 @@ impl TranslatorView {
             Event::Chunk {
                 job, index, count, ..
             } if *job == active => {
-                self.files.progress = Some((index + 1, *count));
+                // Chunk events arrive when a chunk starts. Earlier chunks are complete.
+                self.files.progress = Some((*index, *count));
                 cx.notify();
                 return true;
             }
@@ -1426,6 +1428,12 @@ impl TranslatorView {
             })
             .when(busy, |card| {
                 let (done, total) = self.files.progress.unwrap_or_default();
+                let percent = done.saturating_mul(100).checked_div(total).unwrap_or(0);
+                let label = if total == 0 {
+                    t!("files.starting")
+                } else {
+                    t!("files.progress", percent = percent)
+                };
                 card.child(
                     v_flex()
                         .gap_2()
@@ -1433,21 +1441,14 @@ impl TranslatorView {
                         .pb_4()
                         .text_sm()
                         .text_color(theme.muted_foreground)
+                        .child(label.into_owned())
                         .child(
-                            if total == 0 {
-                                t!("files.starting")
-                            } else {
-                                t!("files.progress", done = done, total = total)
-                            }
-                            .into_owned(),
-                        )
-                        .when(total > 0, |progress| {
-                            progress.child(
-                                Progress::new("file-progress")
-                                    .color(accent)
-                                    .value(100. * done as f32 / total as f32),
-                            )
-                        }),
+                            Progress::new("file-progress")
+                                .accessibility_label(t!("files.progress_label").into_owned())
+                                .color(accent)
+                                .loading(total == 0 || (total == 1 && done == 0))
+                                .value(percent as f32),
+                        ),
                 )
             })
             .when_some(completed, |card, result| {
@@ -1476,11 +1477,7 @@ impl TranslatorView {
         let review = &result.review;
         let muted = theme.muted_foreground;
         let guidance = [
-            Some(if review.partial_translation {
-                t!("files.partial_translation")
-            } else {
-                t!("files.machine_translation")
-            }),
+            Some(t!("files.machine_translation")),
             review.update_toc.then(|| t!("files.update_toc")),
             review.check_slides.then(|| t!("files.check_slides")),
             review.check_word.then(|| t!("files.check_word")),
@@ -1523,43 +1520,64 @@ impl TranslatorView {
                         )
                     }),
             )
-            .when(result.has_changes, |panel| {
-                panel.children(
-                    guidance
-                        .into_iter()
-                        .flatten()
-                        .map(|line| div().text_sm().text_color(muted).child(line.into_owned())),
+            .when(result.has_changes && review.partial_translation, |panel| {
+                panel.child(
+                    div()
+                        .text_sm()
+                        .text_color(muted)
+                        .child(t!("files.partial_translation").into_owned()),
                 )
             })
-            .when(!review.locations.is_empty(), |panel| {
-                panel
-                    .child(
-                        Button::new("file-review-locations")
-                            .small()
-                            .ghost()
-                            .label(t!("files.review_locations").into_owned())
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.files.show_review = !this.files.show_review;
-                                cx.notify();
-                            })),
-                    )
-                    .when(self.files.show_review, |panel| {
-                        panel.child(
-                            div()
-                                .id("file-review-list")
-                                .max_h(scaled(240.))
-                                .overflow_y_scroll()
-                                .child(
-                                    v_flex().gap_1().children(
-                                        review
-                                            .locations
-                                            .iter()
-                                            .map(|line| div().text_sm().child(line.clone())),
-                                    ),
-                                ),
+            .when(
+                result.has_changes || !review.locations.is_empty(),
+                |panel| {
+                    panel
+                        .child(
+                            Button::new("file-review-locations")
+                                .small()
+                                .ghost()
+                                .label(
+                                    t!(if self.files.show_review {
+                                        "files.hide_review"
+                                    } else {
+                                        "files.show_review"
+                                    })
+                                    .into_owned(),
+                                )
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.files.show_review = !this.files.show_review;
+                                    cx.notify();
+                                })),
                         )
-                    })
-            })
+                        .when(self.files.show_review, |panel| {
+                            panel.child(
+                                div()
+                                    .id("file-review-list")
+                                    .max_h(scaled(240.))
+                                    .overflow_y_scroll()
+                                    .child(
+                                        v_flex()
+                                            .gap_1()
+                                            .when(result.has_changes, |details| {
+                                                details.children(
+                                                    guidance.into_iter().flatten().map(|line| {
+                                                        div()
+                                                            .text_sm()
+                                                            .text_color(muted)
+                                                            .child(line.into_owned())
+                                                    }),
+                                                )
+                                            })
+                                            .children(
+                                                review.locations.iter().map(|line| {
+                                                    div().text_sm().child(line.clone())
+                                                }),
+                                            ),
+                                    ),
+                            )
+                        })
+                },
+            )
             .into_any_element()
     }
 

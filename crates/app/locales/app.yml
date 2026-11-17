@@ -763,8 +763,12 @@ files.starting:
   ja: "翻訳を準備中…"
 
 files.progress:
-  en: "Translating %{done} / %{total}"
-  ja: "翻訳中 %{done} / %{total}"
+  en: "Translating · %{percent}%"
+  ja: "翻訳中 · %{percent}%"
+
+files.progress_label:
+  en: "Translation progress"
+  ja: "翻訳の進捗"
 
 files.done:
   en: "Translation complete"
@@ -851,8 +855,8 @@ files.no_changes:
   ja: "保存できる訳文がありません。元のファイルと翻訳先の言語を確認してください。"
 
 files.partial_translation:
-  en: "Some text could not be translated. Compare the translation with the original."
-  ja: "一部を翻訳できませんでした。訳文を原本と照合してください。"
+  en: "Some content was kept in the original language."
+  ja: "一部は原文のままです。"
 
 files.update_toc:
   en: "Update the table of contents in Word."
@@ -863,16 +867,20 @@ files.check_slides:
   ja: "PowerPointで文字が枠からはみ出していないか確認してください。"
 
 files.machine_translation:
-  en: "Machine translation. Check numbers and conditions against the original."
-  ja: "機械翻訳。数値や条件は原本と照合してください。"
+  en: "Before sharing, review key details such as numbers and conditions."
+  ja: "共有前に、数値や条件などの重要な箇所をご確認ください。"
 
 files.check_word:
-  en: "Check text boxes, tables and pagination in Word."
-  ja: "Wordでテキストボックス・表・改ページを確認してください。"
+  en: "Review the layout in Word, including text boxes, tables, and page breaks."
+  ja: "Wordでテキストボックス、表、改ページなどのレイアウトをご確認ください。"
 
-files.review_locations:
-  en: "Show / hide review locations"
-  ja: "確認箇所を表示・非表示"
+files.show_review:
+  en: "Show review details"
+  ja: "確認の詳細を表示"
+
+files.hide_review:
+  en: "Hide review details"
+  ja: "確認の詳細を閉じる"
 
 files.slide:
   en: "Slide %{number}"
