@@ -47,6 +47,9 @@ on macOS), choose a language, translate, and save to a new name. Existing files 
 never overwritten. Cancelled jobs cannot be saved.
 
 Review locations identify retained source text and possible layout problems.
+PowerPoint text is shrunk only to 80% of its original size (with an 8 pt floor).
+Frames that still cannot fit keep the full translation at the original sizes and
+are flagged for review. Text originally smaller than 8 pt is not enlarged.
 Applied translations are not an accuracy score: check numbers, conditions and
 Office layout against the original. TXT and Markdown accept UTF-8 or BOM-marked
 UTF-16; convert legacy encodings to UTF-8 first. PDF file translation is not included.

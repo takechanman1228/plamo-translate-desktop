@@ -652,6 +652,53 @@ fn word_heading_bookmarks_keep_their_original_edges_and_ids() {
 }
 
 #[test]
+fn powerpoint_export_limits_shrinking_and_reports_unfitted_frames() {
+    // Heights exercise an exact 80% fit, a fit requiring more shrinking,
+    // auto-fit shapes, hundredth-point rounding, and the absolute font floor.
+    for (height, font, autofit, expected_font, overflow) in [
+        (243840, 2000, "", 1600, false),
+        (230000, 2000, "", 2000, true),
+        (127000, 2000, "<a:spAutoFit/>", 2000, true),
+        (123000, 1001, "", 801, false),
+        (121920, 900, "", 800, false),
+        (63500, 700, "", 700, true),
+    ] {
+        let geometry = format!(r#"<a:ext cx="3810000" cy="{height}"/>"#);
+        let xml = format!(
+            r#"<root xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><sp><spPr><a:xfrm>{geometry}</a:xfrm></spPr><txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0">{autofit}</a:bodyPr><a:p><a:r><a:rPr sz="{font}"/><a:t>Source label</a:t></a:r></a:p></txBody></sp></root>"#
+        );
+        let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
+        for (name, contents) in [
+            ("[Content_Types].xml", "<Types/>"),
+            ("ppt/presentation.xml", "<presentation/>"),
+            ("ppt/slides/slide1.xml", xml.as_str()),
+        ] {
+            zip.start_file(name, SimpleFileOptions::default()).unwrap();
+            zip.write_all(contents.as_bytes()).unwrap();
+        }
+        let deck = OfficeDocument::open_mode(zip.finish().unwrap().into_inner(), true).unwrap();
+        let translation = "Translation & text";
+        let targets = vec![Some(translation.to_owned())];
+        let review = deck.parts()[0].overflow_frames(&targets);
+        assert_eq!(
+            review.len(),
+            usize::from(overflow),
+            "font={font}, height={height}"
+        );
+        let output = deck.write("en", &[targets]).unwrap();
+        let reopened = OfficeDocument::open(output).unwrap();
+        let slide = &reopened.parts()[0];
+        assert_eq!(slide.paragraphs[0].plain_text(), translation);
+        assert_eq!(
+            slide.paragraphs[0].font_size,
+            Some(f64::from(expected_font) / 100.0)
+        );
+        assert!(slide.xml.contains(&geometry));
+        assert!(slide.xml.contains(autofit));
+    }
+}
+
+#[test]
 fn reports_overflow_without_changing_shape_or_paragraph_geometry() {
     let xml = concat!(
         r#"<root xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">"#,
@@ -707,12 +754,15 @@ fn fits_translated_text_beside_a_retained_paragraph() {
     );
     let (p, _) = paragraphs(xml).unwrap();
     let frame = layout::frames(xml).unwrap().remove(0);
-    let fit = frame
-        .fit(p.iter().zip([
-            None,
-            Some("This translated sentence needs several lines inside the original text box."),
-        ]))
-        .unwrap();
+    let translation = "This translated sentence needs several lines inside the original text box.";
+    let fit = frame.fit(p.iter().zip([None, Some(translation)])).unwrap();
+    // This smaller box used to fit by shrinking more than 20%.
+    assert!(fit.overflow);
+    assert!(!fit.applies());
+
+    let taller = xml.replace(r#"cy="635000""#, r#"cy="850900""#);
+    let frame = layout::frames(&taller).unwrap().remove(0);
+    let fit = frame.fit(p.iter().zip([None, Some(translation)])).unwrap();
     assert!(fit.applies());
     assert!(!fit.overflow);
     // The source paragraph remains absent from the replacement set; its

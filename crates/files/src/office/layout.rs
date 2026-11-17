@@ -30,7 +30,6 @@ pub(super) struct Frame {
     arrow: bool,
     rect: bool,
     top_aligned: bool,
-    grows_to_fit: bool,
     blank_height: f64,
     has_text: bool,
     body: Option<Range<usize>>,
@@ -49,7 +48,6 @@ impl Default for Frame {
             arrow: false,
             rect: false,
             top_aligned: true,
-            grows_to_fit: false,
             blank_height: 0.0,
             has_text: false,
             body: None,
@@ -155,7 +153,7 @@ impl Frame {
         }
 
         for width_factor in [WIDTH_RESERVE, 1.0] {
-            for percentage in (40..=100).rev() {
+            for percentage in (80..=100).rev() {
                 let scale = f64::from(percentage) / 100.0;
                 if !overflow(scale, self.wrap, height, width_factor) {
                     return Some(Fit {
@@ -165,15 +163,8 @@ impl Frame {
                 }
             }
         }
-        if self.grows_to_fit {
-            let largest = lines.iter().map(|line| line.font).fold(MIN_FONT, f64::max);
-            if largest > MIN_FONT {
-                return Some(Fit {
-                    scale: MIN_FONT / largest,
-                    overflow: true,
-                });
-            }
-        }
+        // Keep the original sizes and full translation for manual review when
+        // fitting would require more than 20% shrinking, including auto-fit shapes.
         Some(Fit {
             scale: 1.0,
             overflow: true,
@@ -297,7 +288,10 @@ fn line_count(text: &str, capacity: f64, wrap: bool) -> Option<u32> {
 }
 
 fn scaled_font(font: f64, scale: f64) -> f64 {
-    (font * scale).max(MIN_FONT.min(font))
+    // Office stores hundredths of a point. Round upward so the written size
+    // never crosses the scale/absolute floor; use that same size for fitting.
+    let points = (font * scale).max(MIN_FONT.min(font));
+    (points * 100.0 - 1e-9).ceil() / 100.0
 }
 
 impl Fit {
@@ -341,7 +335,7 @@ impl Fit {
                                 end..end,
                                 format!(
                                     "<{prefix}rPr sz=\"{:.0}\"/>",
-                                    (scaled_font(font, self.scale) * 100.0).floor()
+                                    (scaled_font(font, self.scale) * 100.0).round()
                                 ),
                             ));
                         }
@@ -359,7 +353,7 @@ impl Fit {
                         let range = start..reader.buffer_position() as usize;
                         let updated = rewrite_tag(
                             &xml[range.clone()],
-                            &[(key, &format!("{:.0}", value.floor()))],
+                            &[(key, &format!("{:.0}", value.round()))],
                         )?;
                         edits.push((range, updated));
                     }
@@ -565,9 +559,6 @@ pub(super) fn frames(xml: &str) -> Result<Vec<Frame>, Error> {
                             );
                             frame.rect = preset.as_ref() == b"rect" && !stack.contains(&Group);
                         }
-                    }
-                    (b"spAutoFit", [.., Shape, TextBody, Body]) => {
-                        frame.grows_to_fit = true;
                     }
                     (b"bodyPr", [.., Shape, TextBody]) => {
                         frame.horizontal_inset = points(node, b"lIns").unwrap_or(7.2)

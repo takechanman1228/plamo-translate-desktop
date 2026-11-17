@@ -17,6 +17,11 @@ replaced. There is no batch queue or resume after the app exits.
 PDF file translation is outside this feature. The browser extension's existing
 PDF viewer is unaffected.
 
+PowerPoint font shrinking stops at 80% of the original size, with an 8 pt floor
+(text originally smaller than 8 pt is not enlarged). If the translation still
+cannot fit, its full text and original font sizes are saved and the frame is
+listed for review. This also applies to shapes with automatic sizing.
+
 ## Reviewing a result
 
 Open **Show / hide review locations** for applied/retained paragraph or line
