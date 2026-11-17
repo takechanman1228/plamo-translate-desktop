@@ -1802,6 +1802,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "files"
+version = "0.6.0"
+dependencies = [
+ "encoding_rs",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "filetime"
 version = "0.2.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
