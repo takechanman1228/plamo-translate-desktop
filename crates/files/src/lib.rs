@@ -8,6 +8,7 @@ use encoding_rs::{UTF_16BE, UTF_16LE};
 use thiserror::Error;
 
 pub mod markdown;
+pub mod office;
 
 pub const MAX_FILE_BYTES: usize = 4 * 1024 * 1024;
 
@@ -29,6 +30,8 @@ pub enum FileError {
     OriginalDestination,
     #[error("destination already exists; choose a new filename")]
     DestinationExists,
+    #[error(transparent)]
+    Office(#[from] office::Error),
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
