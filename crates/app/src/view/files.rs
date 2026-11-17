@@ -5,34 +5,11 @@ use ::files::markdown::Markdown;
 use ::files::office::{MAX_UNIT_TOKENS, OfficeDocument};
 use engine::units::{Unit, UnitRequest, UnitResult, UnitTuning};
 
-use gpui_kit::component::{Icon, button::ButtonCustomVariant, progress::Progress};
+use gpui_kit::component::{Icon, progress::Progress};
 
 use super::*;
 
-const FILE_ACCENT: u32 = 0x315cdf;
 pub(super) const FILE_PANEL_WIDTH: f32 = 780.;
-
-fn file_action(button: Button, disabled: bool, cx: &App) -> Button {
-    button
-        .custom(
-            ButtonCustomVariant::new(cx)
-                .color(rgb(FILE_ACCENT).into())
-                .foreground(white())
-                .hover(rgb(0x254dc8).into())
-                .active(rgb(0x1c3fae).into()),
-        )
-        .disabled(disabled)
-        .when(!disabled, |button| button.bg(rgb(FILE_ACCENT)))
-}
-
-fn file_accent(cx: &App) -> Hsla {
-    rgb(if cx.theme().is_dark() {
-        0x9bb5ff
-    } else {
-        FILE_ACCENT
-    })
-    .into()
-}
 
 #[derive(Clone)]
 enum FileDocument {
@@ -881,7 +858,7 @@ impl TranslatorView {
 
     fn render_file_drop_zone(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
-        let accent = file_accent(cx);
+        let accent = theme.primary;
         let drop_enabled = self.current_job.is_none() && !self.file_operation_busy();
         v_flex()
             .id("file-drop-zone")
@@ -937,7 +914,8 @@ impl TranslatorView {
                 Button::new("choose-file")
                     .icon(Lucide::FolderOpen)
                     .label(t!("files.choose").into_owned())
-                    .map(|button| file_action(button, self.file_operation_busy(), cx))
+                    .primary()
+                    .disabled(self.file_operation_busy())
                     .on_click(cx.listener(|this, _, window, cx| this.open_file(window, cx))),
             )
             .into_any_element()
@@ -950,7 +928,7 @@ impl TranslatorView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = cx.theme();
-        let accent = file_accent(cx);
+        let accent = theme.primary;
         let busy = self.jobs.busy();
         let io_busy = self.files.io_busy;
         let completed = self.files.completed.as_ref();
@@ -1002,9 +980,9 @@ impl TranslatorView {
                     };
                     actions
                         .child(translate.ghost())
-                        .child(file_action(primary, io_busy, cx))
+                        .child(primary.primary().disabled(io_busy))
                 } else {
-                    actions.child(file_action(translate, doc.empty() || io_busy, cx))
+                    actions.child(translate.primary())
                 }
             });
         v_flex()
@@ -1129,7 +1107,7 @@ impl TranslatorView {
                             .text_sm()
                             .font_medium()
                             .when(result.has_changes, |row| {
-                                row.child(Icon::new(IconName::Check).text_color(file_accent(cx)))
+                                row.child(Icon::new(IconName::Check).text_color(theme.primary))
                             })
                             .child(status.into_owned()),
                     )
