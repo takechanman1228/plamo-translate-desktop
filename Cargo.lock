@@ -5071,6 +5071,7 @@ dependencies = [
  "async-channel",
  "desktop",
  "engine",
+ "files",
  "gpui-kit",
  "gpui-pre",
  "rust-i18n",
