@@ -41,6 +41,18 @@
 
 ショートカット: `Ctrl+Enter` ですぐに翻訳、`Ctrl+Shift+C` で訳文をコピー、`Ctrl+Q` で終了。macOS では `Cmd+Enter`、`Cmd+Shift+C`、`Cmd+Q` です。
 
+## ファイル翻訳
+
+**ファイル**タブでTXT・Markdown・Word（`.docx`）・PowerPoint（`.pptx`）を、
+同じローカルモデルで翻訳できます。ファイルを1件ドロップするか `Ctrl+O`
+（macOSは `Cmd+O`）で選び、言語を指定して翻訳し、別名で保存します。
+原本・既存ファイルは上書きせず、中止した結果は保存できません。
+
+確認箇所の表示で原文が残った場所やレイアウトの注意箇所を確認できます。
+訳文の適用は正訳の保証ではありません。数値・条件・Officeのレイアウトを原本と照合してください。
+TXT・MarkdownはUTF-8またはBOM付きUTF-16に対応します。従来の文字コードは先にUTF-8へ変換してください。
+PDFファイル翻訳は含みません。[対応範囲と制限](docs/file-translation.md)も参照してください。
+
 ## モデルとライセンス
 
 アプリにはモデルの重みを同梱していません。アプリでモデルを選ぶと、[Hugging Face の Preferred Networks のページ](https://huggingface.co/pfnet)からダウンロードします。

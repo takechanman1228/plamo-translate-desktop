@@ -39,6 +39,19 @@ locally on your computer. It works offline once a model is downloaded. Written i
 
 Shortcuts: `Ctrl+Enter` translates now. `Ctrl+Shift+C` copies the translation. `Ctrl+Q` quits. On macOS these are `Cmd+Enter`, `Cmd+Shift+C`, and `Cmd+Q`.
 
+## File translation
+
+The **Files** tab translates TXT, Markdown, Word (`.docx`) and PowerPoint (`.pptx`)
+using the same local model. Drop one file into the window or press `Ctrl+O` (`Cmd+O`
+on macOS), choose a language, translate, and save to a new name. Existing files are
+never overwritten. Cancelled jobs cannot be saved.
+
+Review locations identify retained source text and possible layout problems.
+Applied translations are not an accuracy score: check numbers, conditions and
+Office layout against the original. TXT and Markdown accept UTF-8 or BOM-marked
+UTF-16; convert legacy encodings to UTF-8 first. PDF file translation is not included.
+See [supported content and limits](docs/file-translation.md).
+
 ## Models and their license
 
 The app does not ship model weights. When you pick a model in the app, it downloads it from
