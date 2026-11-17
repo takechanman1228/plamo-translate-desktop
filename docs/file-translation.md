@@ -10,7 +10,7 @@ replaced. There is no batch queue or resume after the app exits.
 | Format | Translated content | Preserved content and limits |
 | --- | --- | --- |
 | TXT | The same paragraph/chunk path as pasted text | Up to 4 MiB; UTF-8, optionally with BOM, or BOM-marked UTF-16. UTF-16 saves as UTF-8. Uniform line endings are preserved. Legacy encodings must be converted explicitly before opening. |
-| Markdown | Paragraphs (including soft wraps), list items, headings and table cells | Code, math, link targets, front matter and raw HTML remain intact. Unsupported inline structures and raw HTML are reported by line. Punctuation is escaped where needed to preserve syntax. |
+| Markdown | Paragraphs (including soft wraps), list items, headings and table cells | Code, math, link targets, front matter and raw HTML remain intact. Unsupported inline structures and raw HTML are reported by line. Punctuation is written as numeric entities only where it could change the syntax. |
 | DOCX | Supported body, table, header, footer, footnote, endnote and text-box paragraphs | Drawings, links, supported bookmarks and fields retain their structure. Revisions, bound/typed controls and unsupported ranges remain in source. Compatibility fallback drawings remain unchanged. Word may therefore display source text when using a fallback representation. |
 | PPTX | Supported slide, table and speaker-note paragraphs | Paragraph boundaries and inherited bullet styles stay intact. Charts, SmartArt and layout/master text remain in source. Only font sizes may be reduced; shapes, table geometry and paragraph spacing are not moved or resized. |
 
@@ -27,7 +27,8 @@ listed for review. This also applies to shapes with automatic sizing.
 Open **Show / hide review locations** for applied/retained paragraph or line
 locations and layout warnings. Applied means that validated text was written;
 it is not a measure of translation accuracy. An unchanged or wholly rejected
-result cannot be saved. Cancellation discards the unfinished result.
+result cannot be saved. Cancellation discards the unfinished result. Opening another file
+or closing the window asks before discarding a finished translation that was not saved.
 
 Word pagination, floating objects, fixed-height table rows and text boxes need
 native Office review. PowerPoint fitting is an estimate, not a renderer: font
@@ -46,6 +47,8 @@ parts are copied, never rewritten just to normalize their XML.
 Tagged translation units are capped at 1,024 input tokens to avoid splitting
 protected runs. Long or invalid units retain source text. Amount checks cover
 selected scaled yen expressions for Japanese/English, not every number or language.
+A translation whose yen amount cannot be read at all (spelled-out or abbreviated
+numbers) is applied without that check.
 
 ## Verification
 
