@@ -6,9 +6,35 @@ use ::files::office::{MAX_UNIT_TOKENS, OfficeDocument, TagFormat};
 use ::files::pdf::Pdf;
 use engine::units::{Unit, UnitRequest, UnitResult, UnitTuning};
 
+use gpui_kit::component::{Icon, button::ButtonCustomVariant, progress::Progress};
+
 use super::*;
 
 const OFFICE_TAGS: TagFormat = TagFormat::Anchor;
+const FILE_ACCENT: u32 = 0x315cdf;
+pub(super) const FILE_PANEL_WIDTH: f32 = 780.;
+
+fn file_action(button: Button, disabled: bool, cx: &App) -> Button {
+    button
+        .custom(
+            ButtonCustomVariant::new(cx)
+                .color(rgb(FILE_ACCENT).into())
+                .foreground(white())
+                .hover(rgb(0x254dc8).into())
+                .active(rgb(0x1c3fae).into()),
+        )
+        .disabled(disabled)
+        .when(!disabled, |button| button.bg(rgb(FILE_ACCENT)))
+}
+
+fn file_accent(cx: &App) -> Hsla {
+    rgb(if cx.theme().is_dark() {
+        0x9bb5ff
+    } else {
+        FILE_ACCENT
+    })
+    .into()
+}
 
 #[derive(Clone)]
 enum FileDocument {
@@ -111,9 +137,16 @@ enum FileOutput {
 
 struct CompletedFile {
     output: FileOutput,
-    warnings: Vec<String>,
-    applied: Vec<String>,
+    review: FileReview,
     has_changes: bool,
+}
+
+#[derive(Default)]
+struct FileReview {
+    partial_translation: bool,
+    update_toc: bool,
+    check_slides: bool,
+    check_pdf: bool,
 }
 
 struct UnitTranslation {
@@ -141,157 +174,58 @@ impl UnitTranslation {
     }
 }
 
-fn retained_message(item: &::files::office::RetainedContent) -> String {
-    use ::files::office::RetentionReason::*;
-    let reason = match item.reason {
-        UnsupportedPart => t!("files.retained_part"),
-        ReadingGuide => t!("files.retained_reading_guide", count = item.count),
-        Range => t!("files.retained_range"),
-        ProtectedStructure => t!("files.retained_structure"),
-        InlineStructure => t!("files.retained_inline"),
-        TableOfContents => t!("files.retained_toc"),
-    };
-    let location = match item.part.as_str() {
-        "word/document.xml" => t!("files.body").into_owned(),
-        "word/comments.xml" => t!("files.comments").into_owned(),
-        part => part.to_owned(),
-    };
-    let location = if let Some(paragraph) = item.paragraph {
-        t!(
-            "files.paragraph_location",
-            part = location,
-            paragraph = paragraph
-        )
-        .into_owned()
-    } else {
-        location
-    };
-    let location = if item.in_table {
-        format!("{location} ({})", t!("files.office_table"))
-    } else {
-        location
-    };
-    t!(
-        "files.retained_detail",
-        location = location,
-        reason = reason,
-        source = item.source
-    )
-    .into_owned()
-}
-
 fn finish_office(
     deck: &OfficeDocument,
     job: UnitTranslation,
     target: &str,
 ) -> Option<CompletedFile> {
+    use ::files::office::RetentionReason;
+
     if job.completed != job.results.len() {
         return None;
     }
-    let mut warnings = deck
-        .unsupported
-        .iter()
-        .map(retained_message)
-        .collect::<Vec<_>>();
+    let mut review = FileReview::default();
+    for item in &deck.unsupported {
+        match item.reason {
+            RetentionReason::TableOfContents => review.update_toc = true,
+            RetentionReason::Range
+            | RetentionReason::ProtectedStructure
+            | RetentionReason::InlineStructure => {
+                review.partial_translation |= !item.source.trim().is_empty();
+            }
+            RetentionReason::UnsupportedPart => {
+                review.partial_translation |=
+                    item.part.starts_with("ppt/charts/") || item.part.starts_with("ppt/diagrams/");
+            }
+            RetentionReason::ReadingGuide => {}
+        }
+    }
+
     let mut has_changes = false;
-    let mut applied = Vec::new();
     let mut results = job.results.into_iter();
     let mut parts = Vec::new();
     for part in deck.parts() {
         let targets = part
             .paragraphs
             .iter()
-            .enumerate()
-            .map(|(index, paragraph)| {
-                let (position, in_table) = paragraph.word_location().unwrap_or((index + 1, false));
-                let location = if in_table {
-                    format!("{position} ({})", t!("files.office_table"))
-                } else {
-                    position.to_string()
-                };
+            .map(|paragraph| {
                 let outcome = results.next().flatten()?;
-                match outcome {
-                    UnitResult::Complete { text, .. }
-                        if paragraph.amounts_match(OFFICE_TAGS, &text, target) =>
-                    {
-                        let changed = paragraph.changes_text(OFFICE_TAGS, &text, target);
-                        has_changes |= changed;
-                        if changed {
-                            applied.push(
-                                t!("files.applied_office", part = part.name, unit = &location)
-                                    .into_owned(),
-                            );
-                        }
-                        if paragraph.word_translation_needs_review(OFFICE_TAGS, &text, target) {
-                            warnings.push(
-                                t!(
-                                    "files.word_language_review",
-                                    part = part.name,
-                                    unit = location
-                                )
-                                .into_owned(),
-                            );
-                        }
-                        Some(text)
-                    }
-                    reason => {
-                        let reason = match reason {
-                            UnitResult::Cut => t!("files.cut"),
-                            UnitResult::TooLong => t!("files.unit_too_long"),
-                            UnitResult::Complete { .. } => t!("files.office_unit_amount"),
-                            _ => t!("files.unit_invalid"),
-                        };
-                        warnings.push(
-                            t!(
-                                "files.office_retained",
-                                part = part.name,
-                                unit = location,
-                                reason = reason
-                            )
-                            .into_owned(),
-                        );
-                        None
-                    }
+                if let UnitResult::Complete { text, .. } = outcome
+                    && paragraph.amounts_match(OFFICE_TAGS, &text, target)
+                {
+                    has_changes |= paragraph.changes_text(OFFICE_TAGS, &text, target);
+                    return Some(text);
                 }
+                review.partial_translation = true;
+                None
             })
             .collect::<Vec<_>>();
-        let layout = part.word_layout_risks();
-        if !layout.is_empty() {
-            warnings.push(
-                t!(
-                    "files.word_layout_risks",
-                    part = part.name,
-                    units = layout
-                        .iter()
-                        .map(usize::to_string)
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-                .into_owned(),
-            );
-        }
-        let overflow = part.overflow_frames(OFFICE_TAGS, &targets);
-        if !overflow.is_empty() {
-            warnings.push(
-                t!(
-                    "files.pptx_overflow",
-                    part = part.name,
-                    count = overflow.len(),
-                    frames = overflow
-                        .iter()
-                        .map(usize::to_string)
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-                .into_owned(),
-            );
-        }
+        review.check_slides |= !part.overflow_frames(OFFICE_TAGS, &targets).is_empty();
         parts.push(targets);
     }
     Some(CompletedFile {
         output: FileOutput::Office(parts),
-        applied,
-        warnings,
+        review,
         has_changes,
     })
 }
@@ -308,8 +242,6 @@ pub(super) struct FilePanel {
     target: String,
     pub(super) message: Option<String>,
     saved: Option<PathBuf>,
-    shown_warnings: usize,
-    shown_applied: usize,
 }
 
 impl FilePanel {
@@ -461,8 +393,6 @@ impl TranslatorView {
         self.status = Status::Ready;
         self.files.output = ::files::Translation::default();
         self.files.completed = None;
-        self.files.shown_warnings = 0;
-        self.files.shown_applied = 0;
         self.files.progress = None;
         self.files.cancelling = false;
         self.files.message = None;
@@ -617,27 +547,13 @@ impl TranslatorView {
                             .ok()
                             .filter(|(_, warnings)| warnings.len() == stats.cut)
                             .map(|(text, warnings)| CompletedFile {
-                                applied: if text.trim() != doc.source().trim() {
-                                    vec![
-                                        t!(
-                                            "files.applied_text",
-                                            lines = doc.source().lines().count()
-                                        )
-                                        .into_owned(),
-                                    ]
-                                } else {
-                                    Vec::new()
-                                },
                                 has_changes: !text.trim().is_empty()
                                     && text.trim() != doc.source().trim(),
                                 output: FileOutput::Text(text),
-                                warnings: warnings
-                                    .into_iter()
-                                    .map(|line| {
-                                        t!("files.warning", line = line, reason = t!("files.cut"))
-                                            .into_owned()
-                                    })
-                                    .collect(),
+                                review: FileReview {
+                                    partial_translation: !warnings.is_empty(),
+                                    ..Default::default()
+                                },
                             }),
                         (Some((_, FileDocument::Markdown(doc))), Some(batch)) => batch
                             .text_targets()
@@ -650,57 +566,23 @@ impl TranslatorView {
                                 Err(_) => None,
                             })
                             .map(|export| CompletedFile {
-                                applied: doc
-                                    .segments()
-                                    .iter()
-                                    .filter(|segment| {
-                                        !export.retained_lines.contains(&segment.line)
-                                    })
-                                    .map(|segment| {
-                                        t!("files.applied_line", line = segment.line).into_owned()
-                                    })
-                                    .collect(),
                                 has_changes: export.translated > 0,
                                 output: FileOutput::Markdown(Arc::new(export.bytes)),
-                                warnings: export
-                                    .retained_lines
-                                    .into_iter()
-                                    .map(|line| {
-                                        t!(
-                                            "files.warning",
-                                            line = line,
-                                            reason = t!("files.unit_invalid")
-                                        )
-                                        .into_owned()
-                                    })
-                                    .collect(),
+                                review: FileReview {
+                                    partial_translation: !export.retained_lines.is_empty(),
+                                    ..Default::default()
+                                },
                             }),
                         (Some((_, FileDocument::Pdf(doc))), Some(batch)) => {
                             batch.text_targets().map(|mut targets| {
                                 doc.check_amounts(&mut targets, &self.files.target);
-                                let warnings = doc
-                                    .review_pages(&targets)
-                                    .into_iter()
-                                    .map(|page| {
-                                        t!("files.pdf_review_page", page = page).into_owned()
-                                    })
-                                    .collect();
                                 CompletedFile {
-                                    applied: doc
-                                        .applied_units(&targets)
-                                        .into_iter()
-                                        .map(|index| {
-                                            t!(
-                                                "files.applied_pdf",
-                                                page = doc.units()[index].page,
-                                                unit = index + 1
-                                            )
-                                            .into_owned()
-                                        })
-                                        .collect(),
                                     has_changes: !doc.applied_units(&targets).is_empty(),
+                                    review: FileReview {
+                                        check_pdf: !doc.review_pages(&targets).is_empty(),
+                                        ..Default::default()
+                                    },
                                     output: FileOutput::Pdf(Arc::new(targets)),
-                                    warnings,
                                 }
                             })
                         }
@@ -819,137 +701,333 @@ impl TranslatorView {
     }
 
     pub(super) fn render_files(&self, cx: &mut Context<Self>) -> AnyElement {
-        let busy = self.jobs.busy();
-        let mut content = v_flex()
-            .gap_3()
-            .child(div().text_lg().child(t!("files.title").into_owned()))
-            .child(t!("files.preview").into_owned())
-            .child(
-                Button::new("choose-file")
-                    .label(t!("files.choose").into_owned())
-                    .disabled(busy || self.files.io_busy)
-                    .on_click(cx.listener(|this, _, _, cx| this.choose_file(cx))),
-            );
-        if let Some((path, doc)) = &self.files.loaded {
-            content = content.child(
-                path.file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into_owned(),
-            );
-            let encoding = match doc {
-                FileDocument::Text(doc) => doc.converted_encoding,
-                FileDocument::Markdown(doc) => doc.converted_encoding(),
-                _ => None,
-            };
-            if let Some(encoding) = encoding {
-                content = content.child(t!("files.encoding", encoding = encoding).into_owned());
-            }
-            if busy {
-                let progress = self.files.progress.map_or_else(
-                    || t!("files.starting").into_owned(),
-                    |(done, total)| t!("files.progress", done = done, total = total).into_owned(),
-                );
-                content = content.child(progress).child(
-                    Button::new("cancel-file")
-                        .danger()
-                        .label(t!("action.stop").into_owned())
-                        .disabled(self.files.cancelling)
-                        .on_click(cx.listener(|this, _, _, cx| this.cancel_file(cx))),
-                );
-            } else {
-                content = content.child(
-                    Button::new("translate-file")
-                        .primary()
-                        .label(t!("action.translate").into_owned())
-                        .disabled(doc.empty() || self.files.io_busy)
-                        .on_click(cx.listener(|this, _, window, cx| this.start_file(window, cx))),
-                );
-            }
-        }
-        if let Some(completed) = &self.files.completed {
-            let warnings = &completed.warnings;
-            content = content
-                .child(if !completed.has_changes {
-                    t!("files.no_changes").into_owned()
-                } else if warnings.is_empty() {
-                    t!("files.done").into_owned()
-                } else {
-                    t!("files.review", count = warnings.len()).into_owned()
-                })
-                .child(
-                    div()
-                        .text_sm()
-                        .child(t!("files.machine_translation").into_owned()),
-                )
-                .child(
-                    Button::new("save-file")
-                        .primary()
-                        .label(t!("files.save").into_owned())
-                        .disabled(self.files.io_busy || !completed.has_changes)
-                        .on_click(cx.listener(|this, _, _, cx| this.save_file(cx))),
-                )
-                .children(
-                    warnings
-                        .iter()
-                        .take(self.files.shown_warnings.max(100))
-                        .map(|warning| div().text_sm().child(warning.clone())),
-                );
-            if !completed.applied.is_empty() {
-                content = content
-                    .child(t!("files.applied_count", count = completed.applied.len()).into_owned());
-                if self.files.shown_applied < completed.applied.len() {
-                    content = content.child(
-                        Button::new("show-file-applied")
-                            .label(t!("files.show_applied").into_owned())
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.files.shown_applied =
-                                    this.files.shown_applied.saturating_add(100);
-                                cx.notify();
-                            })),
-                    );
-                }
-                content = content.children(
-                    completed
-                        .applied
-                        .iter()
-                        .take(self.files.shown_applied)
-                        .map(|line| div().text_sm().child(line.clone())),
-                );
-            }
-            if warnings.len() > self.files.shown_warnings.max(100) {
-                content = content.child(
-                    Button::new("more-file-warnings")
-                        .label(t!("files.show_more_warnings").into_owned())
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.files.shown_warnings =
-                                this.files.shown_warnings.max(100).saturating_add(100);
-                            cx.notify();
-                        })),
-                );
-            }
-        }
-        if self.files.io_busy {
-            content = content.child(t!("files.working").into_owned());
-        }
-        if let Some(message) = &self.files.message {
-            content = content.child(div().text_color(cx.theme().warning).child(message.clone()));
-        }
-        if let Some(path) = &self.files.saved {
-            let path = path.clone();
-            content = content.child(t!("files.saved").into_owned()).child(
-                Button::new("reveal-file")
-                    .label(t!("files.reveal").into_owned())
-                    .on_click(move |_, _, cx| cx.reveal_path(&path)),
-            );
-        }
+        let content = match &self.files.loaded {
+            Some((path, document)) => self.render_loaded_file(path, document, cx),
+            None => self.render_file_drop_zone(cx),
+        };
+        let theme = cx.theme();
         div()
             .id("file-scroll")
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
-            .p_4()
-            .child(content)
+            .px_5()
+            .py_6()
+            .child(
+                v_flex()
+                    .w_full()
+                    .max_w(px(FILE_PANEL_WIDTH))
+                    .mx_auto()
+                    .gap_3()
+                    .child(content)
+                    .when(self.files.io_busy, |panel| {
+                        panel.child(
+                            div()
+                                .px_1()
+                                .text_sm()
+                                .text_color(theme.muted_foreground)
+                                .child(t!("files.working").into_owned()),
+                        )
+                    })
+                    .when_some(self.files.message.clone(), |panel, message| {
+                        panel.child(
+                            h_flex()
+                                .gap_2()
+                                .items_start()
+                                .rounded_lg()
+                                .border_1()
+                                .border_color(theme.warning.opacity(0.42))
+                                .bg(theme.warning.opacity(0.08))
+                                .px_3()
+                                .py_2()
+                                .text_sm()
+                                .child(Icon::new(Lucide::CircleAlert))
+                                .child(div().min_w_0().child(message)),
+                        )
+                    }),
+            )
+            .into_any_element()
+    }
+
+    fn render_file_drop_zone(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme();
+        let accent = file_accent(cx);
+        let drop_enabled = self.current_job.is_none() && !self.file_operation_busy();
+        v_flex()
+            .id("file-drop-zone")
+            .items_center()
+            .justify_center()
+            .text_center()
+            .gap_4()
+            .px_5()
+            .py_12()
+            .rounded_xl()
+            .border_1()
+            .border_dashed()
+            .border_color(theme.border)
+            .bg(theme.muted.opacity(0.36))
+            .when(drop_enabled, |zone| {
+                zone.drag_over::<ExternalPaths>(move |style, paths, _, _| {
+                    if paths.paths().len() == 1 {
+                        style.border_color(accent).bg(accent.opacity(0.10))
+                    } else {
+                        style
+                    }
+                })
+            })
+            .child(
+                h_flex()
+                    .justify_center()
+                    .size(px(52.))
+                    .rounded_xl()
+                    .bg(accent.opacity(0.12))
+                    .child(
+                        Icon::new(Lucide::FileInput)
+                            .size(px(24.))
+                            .text_color(accent),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_lg()
+                            .font_semibold()
+                            .child(t!("files.drop_prompt").into_owned()),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(theme.muted_foreground)
+                            .child("PDF · Word · PowerPoint · Markdown · TXT"),
+                    ),
+            )
+            .child(
+                Button::new("choose-file")
+                    .icon(Lucide::FolderOpen)
+                    .label(t!("files.choose").into_owned())
+                    .map(|button| file_action(button, self.file_operation_busy(), cx))
+                    .on_click(cx.listener(|this, _, _, cx| this.choose_file(cx))),
+            )
+            .into_any_element()
+    }
+
+    fn render_loaded_file(
+        &self,
+        path: &Path,
+        doc: &FileDocument,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = cx.theme();
+        let accent = file_accent(cx);
+        let busy = self.jobs.busy();
+        let io_busy = self.files.io_busy;
+        let completed = self.files.completed.as_ref();
+        let encoding = match doc {
+            FileDocument::Text(doc) => doc.converted_encoding,
+            FileDocument::Markdown(doc) => doc.converted_encoding(),
+            _ => None,
+        };
+        let filename = path.file_name().unwrap_or_default().to_string_lossy();
+        let translate = Button::new("translate-file")
+            .label(
+                if completed.is_some() {
+                    t!("files.translate_again")
+                } else {
+                    t!("action.translate")
+                }
+                .into_owned(),
+            )
+            .disabled(doc.empty() || io_busy)
+            .on_click(cx.listener(|this, _, window, cx| this.start_file(window, cx)));
+        let actions = h_flex()
+            .flex_wrap()
+            .gap_2()
+            .child(
+                Button::new("choose-file")
+                    .ghost()
+                    .label(t!("files.change_file").into_owned())
+                    .disabled(busy || io_busy)
+                    .on_click(cx.listener(|this, _, _, cx| this.choose_file(cx))),
+            )
+            .map(|actions| {
+                if busy {
+                    actions.child(
+                        Button::new("cancel-file")
+                            .danger()
+                            .outline()
+                            .label(t!("action.stop").into_owned())
+                            .disabled(self.files.cancelling)
+                            .on_click(cx.listener(|this, _, _, cx| this.cancel_file(cx))),
+                    )
+                } else if completed.is_some_and(|result| result.has_changes) {
+                    let primary = if let Some(path) = self.files.saved.clone() {
+                        Button::new("open-saved-file")
+                            .icon(Lucide::FileText)
+                            .label(t!("files.open_saved").into_owned())
+                            .on_click(move |_, _, cx| cx.open_with_system(&path))
+                    } else {
+                        self.save_file_button(cx).icon(Lucide::Download)
+                    };
+                    actions
+                        .child(translate.ghost())
+                        .child(file_action(primary, io_busy, cx))
+                } else {
+                    actions.child(file_action(translate, doc.empty() || io_busy, cx))
+                }
+            });
+        v_flex()
+            .rounded_xl()
+            .border_1()
+            .border_color(theme.border)
+            .child(
+                h_flex()
+                    .items_center()
+                    .flex_wrap()
+                    .gap_3()
+                    .p_4()
+                    .child(
+                        h_flex()
+                            .flex_1()
+                            .min_w(px(180.))
+                            .gap_3()
+                            .child(
+                                h_flex()
+                                    .justify_center()
+                                    .flex_shrink_0()
+                                    .size(px(40.))
+                                    .rounded_lg()
+                                    .bg(accent.opacity(0.12))
+                                    .child(Icon::new(Lucide::FileText).text_color(accent)),
+                            )
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .font_semibold()
+                                    .truncate()
+                                    .child(filename.into_owned()),
+                            ),
+                    )
+                    .child(actions),
+            )
+            .when_some(encoding, |card, encoding| {
+                card.child(
+                    div()
+                        .px_4()
+                        .pb_3()
+                        .text_sm()
+                        .text_color(theme.muted_foreground)
+                        .child(t!("files.encoding", encoding = encoding).into_owned()),
+                )
+            })
+            .when(busy, |card| {
+                let (done, total) = self.files.progress.unwrap_or_default();
+                card.child(
+                    v_flex()
+                        .gap_2()
+                        .px_4()
+                        .pb_4()
+                        .text_sm()
+                        .text_color(theme.muted_foreground)
+                        .child(
+                            if total == 0 {
+                                t!("files.starting")
+                            } else {
+                                t!("files.progress", done = done, total = total)
+                            }
+                            .into_owned(),
+                        )
+                        .when(total > 0, |progress| {
+                            progress.child(
+                                Progress::new("file-progress")
+                                    .color(accent)
+                                    .value(100. * done as f32 / total as f32),
+                            )
+                        }),
+                )
+            })
+            .when_some(completed, |card, result| {
+                card.child(self.render_file_result(result, cx))
+            })
+            .into_any_element()
+    }
+
+    fn save_file_button(&self, cx: &Context<Self>) -> Button {
+        Button::new("save-file")
+            .label(t!("files.save").into_owned())
+            .disabled(self.files.io_busy)
+            .on_click(cx.listener(|this, _, _, cx| this.save_file(cx)))
+    }
+
+    fn render_file_result(&self, result: &CompletedFile, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme();
+        let saved = self.files.saved.as_ref();
+        let status = if !result.has_changes {
+            t!("files.no_changes")
+        } else if saved.is_some() {
+            t!("files.saved")
+        } else {
+            t!("files.done")
+        };
+        let review = &result.review;
+        let muted = theme.muted_foreground;
+        let guidance = [
+            Some(if review.partial_translation {
+                t!("files.partial_translation")
+            } else {
+                t!("files.machine_translation")
+            }),
+            review.update_toc.then(|| t!("files.update_toc")),
+            review.check_slides.then(|| t!("files.check_slides")),
+            review.check_pdf.then(|| t!("files.check_pdf")),
+        ];
+        v_flex()
+            .gap_2()
+            .border_t_1()
+            .border_color(theme.border)
+            .px_4()
+            .py_3()
+            .child(
+                h_flex()
+                    .flex_wrap()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .text_sm()
+                            .font_medium()
+                            .when(result.has_changes, |row| {
+                                row.child(Icon::new(IconName::Check).text_color(file_accent(cx)))
+                            })
+                            .child(status.into_owned()),
+                    )
+                    .when_some(saved.cloned(), |row, path| {
+                        row.child(
+                            h_flex()
+                                .flex_wrap()
+                                .gap_2()
+                                .child(self.save_file_button(cx).small().ghost())
+                                .child(
+                                    Button::new("reveal-file")
+                                        .small()
+                                        .ghost()
+                                        .icon(Lucide::FolderOpen)
+                                        .label(t!("files.reveal").into_owned())
+                                        .on_click(move |_, _, cx| cx.reveal_path(&path)),
+                                ),
+                        )
+                    }),
+            )
+            .when(result.has_changes, |panel| {
+                panel.children(
+                    guidance
+                        .into_iter()
+                        .flatten()
+                        .map(|line| div().text_sm().text_color(muted).child(line.into_owned())),
+                )
+            })
             .into_any_element()
     }
 
@@ -1039,6 +1117,7 @@ mod file_completion_tests {
             )
             .unwrap();
             assert!(!done.has_changes);
+            assert!(done.review.partial_translation);
         }
         let done = finish_office(
             &deck,
@@ -1053,7 +1132,43 @@ mod file_completion_tests {
         )
         .unwrap();
         assert!(done.has_changes);
+        assert!(!done.review.partial_translation);
         let incomplete = finish_office(&deck, UnitTranslation::new(1), "en");
         assert!(incomplete.is_none());
+    }
+
+    #[test]
+    fn retained_chart_text_prompts_review_but_slide_templates_do_not() {
+        use ::files::office::{RetainedContent, RetentionReason};
+
+        let mut deck =
+            OfficeDocument::open(include_bytes!("../test-data/file-result.pptx").to_vec()).unwrap();
+        for (part, partial) in [
+            ("ppt/slideLayouts/slideLayout1.xml", false),
+            ("ppt/charts/chart1.xml", true),
+            ("ppt/diagrams/data1.xml", true),
+        ] {
+            deck.unsupported = vec![RetainedContent {
+                part: part.into(),
+                paragraph: None,
+                in_table: false,
+                count: 1,
+                source: String::new(),
+                reason: RetentionReason::UnsupportedPart,
+            }];
+            let result = finish_office(
+                &deck,
+                UnitTranslation {
+                    results: vec![Some(UnitResult::Complete {
+                        text: "Sales were 1 million yen.".into(),
+                        retried: false,
+                    })],
+                    completed: 1,
+                },
+                "en",
+            )
+            .unwrap();
+            assert_eq!(result.review.partial_translation, partial, "{part}");
+        }
     }
 }

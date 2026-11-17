@@ -2821,28 +2821,47 @@ impl Render for TranslatorView {
             .px_3()
             .py_2()
             .gap_2()
+            .when(self.file_tab, |toolbar| {
+                toolbar
+                    .w_full()
+                    .max_w(px(files::FILE_PANEL_WIDTH + 40.))
+                    .mx_auto()
+                    .px_5()
+                    .flex_none()
+            })
             .child(
                 Select::new(&self.source_select)
-                    .w(scaled(210.))
+                    .w(scaled(if self.file_tab { 190. } else { 210. }))
                     .menu_width(scaled(260.))
                     .search_placeholder(t!("search.language").into_owned()),
             )
-            .child(
-                Button::new("swap")
-                    .ghost()
-                    .icon(Lucide::ArrowLeftRight)
-                    .tooltip(t!("action.swap").into_owned())
-                    .disabled(self.file_tab || !self.can_swap())
-                    .on_click(cx.listener(|this, _, window, cx| this.swap(window, cx))),
-            )
+            .map(|toolbar| {
+                if self.file_tab {
+                    toolbar
+                        .child(gpui_kit::component::Icon::new(Lucide::ArrowRight).text_color(muted))
+                } else {
+                    toolbar.child(
+                        Button::new("swap")
+                            .ghost()
+                            .icon(Lucide::ArrowLeftRight)
+                            .tooltip(t!("action.swap").into_owned())
+                            .disabled(!self.can_swap())
+                            .on_click(cx.listener(|this, _, window, cx| this.swap(window, cx))),
+                    )
+                }
+            })
             .child(
                 Select::new(&self.target_select)
-                    .w(scaled(230.))
+                    .w(scaled(if self.file_tab { 215. } else { 230. }))
                     .menu_width(scaled(260.))
                     .search_placeholder(t!("search.language").into_owned()),
             )
             .when(shows_style, |this| {
-                this.child(Select::new(&self.style_select).w(scaled(190.)))
+                this.child(Select::new(&self.style_select).w(scaled(if self.file_tab {
+                    155.
+                } else {
+                    190.
+                })))
             })
             .child(div().flex_1())
             .child(

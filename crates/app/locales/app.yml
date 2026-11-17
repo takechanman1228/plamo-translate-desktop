@@ -686,17 +686,21 @@ files.file_tab:
   en: "Files"
   ja: "ファイル"
 
-files.title:
-  en: "Local file translation"
-  ja: "ローカルファイル翻訳"
-
-files.preview:
-  en: "Choose a TXT, Markdown (.md), PowerPoint (.pptx), Word (.docx), or PDF file."
-  ja: "TXT、Markdown（.md）、PowerPoint（.pptx）、Word（.docx）、PDFのファイルを選んで翻訳できます。"
+files.drop_prompt:
+  en: "Drop a file here"
+  ja: "ここにファイルをドロップ"
 
 files.choose:
   en: "Choose a file…"
   ja: "ファイルを選ぶ…"
+
+files.change_file:
+  en: "Change file…"
+  ja: "ファイルを変更…"
+
+files.translate_again:
+  en: "Translate again"
+  ja: "再翻訳"
 
 files.one_file:
   en: "Choose one file at a time."
@@ -710,13 +714,9 @@ files.pdf_empty:
   en: "No translatable PDF text was found. Scanned pages without a text layer need OCR first."
   ja: "PDFに翻訳できる本文がありません。文字情報のないスキャンは先にOCRが必要です。"
 
-files.pdf_review_page:
-  en: "Original page %{page}: check for retained text, reading order, or missing text."
-  ja: "原本%{page}ページ：未翻訳、読み順、文字の欠落を確認してください。"
-
 files.encoding:
-  en: "Detected %{encoding}; output will be UTF-8 without BOM. Check the original text if this is unexpected."
-  ja: "%{encoding}として読み込みました。出力はBOMなしUTF-8になります。想定外の場合は原文の文字コードを確認してください。"
+  en: "%{encoding} input · Saves as UTF-8 without BOM"
+  ja: "%{encoding}で読み込み · BOMなしUTF-8で保存"
 
 files.starting:
   en: "Preparing translation…"
@@ -727,56 +727,24 @@ files.progress:
   ja: "翻訳中 %{done} / %{total}"
 
 files.done:
-  en: "Translation complete. Save a new file below."
-  ja: "翻訳が完了しました。別ファイルとして保存できます。"
-
-files.review:
-  en: "%{count} items to review."
-  ja: "確認が必要な箇所が %{count} 件あります。"
-
-files.office_table:
-  en: in table
-  ja: 表内
-
-files.word_language_review:
-  en: "%{part}, paragraph %{unit}: check for source-language text"
-  ja: "%{part} の段落 %{unit}：原文の言語が残っていないか確認してください"
-
-files.office_retained:
-  en: "%{part}, text unit %{unit}: original retained (%{reason})"
-  ja: "%{part} の本文 %{unit}：原文を保持（%{reason}）"
-
-files.pptx_overflow:
-  en: "%{part}: text may still overflow in %{count} places (text frame/cell %{frames})"
-  ja: "%{part}：文字がはみ出す可能性がある箇所が %{count} 件あります（枠・セル番号 %{frames}）"
-
-files.unit_too_long:
-  en: "text too long"
-  ja: "文字量が上限を超えました"
-
-files.unit_invalid:
-  en: "could not preserve formatting"
-  ja: "書式を復元できませんでした"
-
-files.warning:
-  en: "Line %{line}: %{reason}"
-  ja: "%{line} 行目：%{reason}"
-
-files.cut:
-  en: "Translation was cut off"
-  ja: "翻訳が途中で打ち切られました"
+  en: "Translation complete"
+  ja: "翻訳完了"
 
 files.save:
   en: "Save as…"
   ja: "名前を付けて保存…"
+
+files.open_saved:
+  en: "Open translation"
+  ja: "訳文を開く"
 
 files.reveal:
   en: "Show in folder"
   ja: "保存先を表示"
 
 files.saved:
-  en: "Saved a new file. The original was not changed."
-  ja: "別ファイルに保存しました。原本は変更していません。"
+  en: "Saved as a new file"
+  ja: "別ファイルに保存済み"
 
 files.working:
   en: "Reading or saving file…"
@@ -822,81 +790,26 @@ files.text_deferred:
   en: "A file is being translated. Text translation will run afterwards using your latest input."
   ja: "ファイルを翻訳中です。テキスト翻訳は、完了後に最新の入力で実行します。"
 
-files.office_unit_amount:
-  en: "Yen amount differs from the original"
-  ja: "円建て金額が原文と一致しません"
-
 files.no_changes:
-  en: "No translated text could be applied. Saving is disabled. Review the retained text below, or check the input and translation language."
-  ja: "適用できる訳文がありません。保存はできません。下の原文保持箇所、入力内容、翻訳先の言語を確認してください。"
+  en: "No translation to save. Check the source file and target language."
+  ja: "保存できる訳文がありません。元のファイルと翻訳先の言語を確認してください。"
 
-files.retained_part:
-  en: "Text in this part is not supported and was retained."
-  ja: "この部分のテキストは未対応のため原文を保持しました。"
+files.partial_translation:
+  en: "Some text could not be translated. Compare the translation with the original."
+  ja: "一部を翻訳できませんでした。訳文を原本と照合してください。"
 
-files.retained_reading_guide:
-  en: "%{count} small reading guides were retained."
-  ja: "小さなふりがな等の読み補助を%{count}件、原文のまま保持しました。"
+files.update_toc:
+  en: "Update the table of contents in Word."
+  ja: "Wordで目次を更新してください。"
 
-files.retained_range:
-  en: "A range boundary inside the text, or an unmatched range, was protected."
-  ja: "文字の途中に範囲の境界があるか、範囲の始点と終点が対応しないため、原文を保持しました。"
+files.check_slides:
+  en: "Check for text that runs off the slide or out of its text box in PowerPoint."
+  ja: "PowerPointで文字が枠からはみ出していないか確認してください。"
 
-files.retained_structure:
-  en: "A protected structure or a field spanning paragraphs was retained."
-  ja: "保護対象の構造、または複数段落にまたがるフィールドのため、原文を保持しました。"
-
-files.retained_inline:
-  en: "Unsupported formatting or embedded content was retained."
-  ja: "未対応の書式や埋め込み内容を含むため、原文を保持しました。"
-
-files.retained_toc:
-  en: "The table-of-contents field was retained. Update the table of contents in Word after translation."
-  ja: "目次フィールドを保持しました。翻訳後にWordで目次を更新してください。"
-
-files.body:
-  en: "Document body"
-  ja: "本文"
-
-files.comments:
-  en: "Comments"
-  ja: "コメント"
-
-files.paragraph_location:
-  en: "%{part}, paragraph %{paragraph}"
-  ja: "%{part}・段落%{paragraph}"
-
-files.retained_detail:
-  en: "%{location}: %{reason} %{source}"
-  ja: "%{location}：%{reason} %{source}"
-
-files.show_more_warnings:
-  en: "Show the next 100 review items"
-  ja: "次の100件の確認箇所を表示"
+files.check_pdf:
+  en: "Check the PDF for missing text or changes in reading order."
+  ja: "PDFで文字の欠落や読み順を確認してください。"
 
 files.machine_translation:
-  en: "Machine translation. Compare with the original before use, including numbers and conditions."
-  ja: "機械翻訳です。数値や条件を含め、使用前に原本と照合してください。"
-
-files.applied_office:
-  en: "%{part}, paragraph/unit %{unit}: translation applied"
-  ja: "%{part} の段落・単位 %{unit}：訳文を適用"
-files.applied_line:
-  en: "Source line %{line}: translation applied"
-  ja: "原文%{line}行目：訳文を適用"
-files.applied_pdf:
-  en: "Original page %{page}, unit %{unit}: translation applied"
-  ja: "原本%{page}ページ・単位%{unit}：訳文を適用"
-files.applied_text:
-  en: "Whole text (source lines 1–%{lines}); any cut ranges are listed separately"
-  ja: "全文（原文1〜%{lines}行）：中断箇所がある場合は別記"
-files.applied_count:
-  en: "%{count} applied ranges. This is not an accuracy score."
-  ja: "訳文の適用範囲は%{count}件です。正訳率ではありません。"
-files.show_applied:
-  en: "Show applied locations (next 100)"
-  ja: "訳文を適用した場所を表示（次の100件）"
-
-files.word_layout_risks:
-  en: "%{part}, paragraphs %{units}: floating objects/tables or fixed row heights. Check overlap and clipping in Word; positions and pagination were not adjusted."
-  ja: "%{part} の段落 %{units}：浮動図形・表または固定行高があります。位置・改ページは調整していません。Wordで重なり・欠けを確認してください。"
+  en: "Machine translation. Check numbers and conditions against the original."
+  ja: "機械翻訳。数値や条件は原本と照合してください。"
