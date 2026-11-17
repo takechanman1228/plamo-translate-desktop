@@ -901,6 +901,10 @@ impl TranslatorView {
         .detach();
     }
 
+    pub(super) fn showing_file_history(&self) -> bool {
+        self.files.loaded.is_none() && !self.file_history.is_empty()
+    }
+
     pub(super) fn render_files(&self, cx: &mut Context<Self>) -> AnyElement {
         let content = match &self.files.loaded {
             Some((path, document)) => self.render_loaded_file(path, document, cx),
@@ -919,7 +923,7 @@ impl TranslatorView {
                     .w_full()
                     .max_w(px(FILE_PANEL_WIDTH))
                     .mx_auto()
-                    .gap_3()
+                    .gap_5()
                     .child(content)
                     .when(!self.file_history.is_empty(), |panel| {
                         panel.child(self.render_file_history(cx))
@@ -990,67 +994,113 @@ impl TranslatorView {
 
     fn render_file_history(&self, cx: &Context<Self>) -> AnyElement {
         let theme = cx.theme();
+        let export_button = |id: ElementId| {
+            Button::new(id)
+                .small()
+                .outline()
+                .flex_none()
+                .icon(Lucide::Download)
+                .label(t!("files.save").into_owned())
+        };
         let rows = self.file_history.iter().enumerate().map(|(index, entry)| {
             let path = entry.output.clone();
             let export = path.clone();
             h_flex()
                 .gap_3()
-                .flex_wrap()
                 .border_t_1()
                 .border_color(theme.border)
-                .px_3()
-                .py_1()
+                .px_4()
+                .py_2()
                 .child(
-                    Button::new(("history-result", index))
-                        .ghost()
-                        .flex_1()
-                        .min_w_0()
-                        .overflow_hidden()
-                        .icon(Lucide::FileText)
-                        .label(entry.filename().to_owned())
-                        .tooltip(t!("files.open_saved").into_owned())
-                        .on_click(move |_, _, cx| cx.open_with_system(&path)),
-                )
-                .child(
-                    div().text_sm().text_color(theme.muted_foreground).child(
-                        t!(
-                            "files.history_target",
-                            target = lang::language_name(entry.target())
-                        )
-                        .into_owned(),
+                    h_flex().flex_1().min_w_0().child(
+                        Button::new(("history-result", index))
+                            .ghost()
+                            .min_w_0()
+                            .max_w_full()
+                            .overflow_hidden()
+                            .icon(Lucide::FileText)
+                            .label(entry.filename().to_owned())
+                            .tooltip(t!("files.open_saved").into_owned())
+                            .on_click(move |_, _, cx| cx.open_with_system(&path)),
                     ),
                 )
                 .child(
                     div()
+                        .w(px(100.))
+                        .text_sm()
+                        .child(lang::language_name(entry.target())),
+                )
+                .child(
+                    div()
+                        .w(px(140.))
                         .text_sm()
                         .text_color(theme.muted_foreground)
                         .child(entry.completed_at()),
                 )
                 .child(
-                    Button::new(("history-export", index))
-                        .small()
-                        .ghost()
-                        .icon(Lucide::Download)
-                        .label(t!("files.save").into_owned())
+                    export_button(("history-export", index).into())
                         .disabled(self.file_operation_busy())
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.export_history_file(export.clone(), cx)
                         })),
                 )
         });
-        v_flex()
-            .rounded_xl()
-            .border_1()
-            .border_color(theme.border)
+        let heading = h_flex()
+            .gap_2()
             .child(
                 div()
-                    .px_4()
-                    .py_2()
-                    .text_sm()
-                    .font_medium()
-                    .child(t!("files.history", count = self.file_history.len()).into_owned()),
+                    .text_xl()
+                    .font_semibold()
+                    .child(t!("files.history_title").into_owned()),
             )
-            .children(rows)
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(theme.muted_foreground)
+                    .child(self.file_history.len().to_string()),
+            );
+        let columns = h_flex()
+            .gap_3()
+            .px_4()
+            .py_2()
+            .bg(theme.muted.opacity(0.5))
+            .text_sm()
+            .text_color(theme.muted_foreground)
+            .child(
+                div()
+                    .pl_2()
+                    .flex_1()
+                    .child(t!("files.filename").into_owned()),
+            )
+            .child(
+                div()
+                    .w(px(100.))
+                    .child(t!("files.history_target").into_owned()),
+            )
+            .child(
+                div()
+                    .w(px(140.))
+                    .child(t!("files.history_completed").into_owned()),
+            )
+            .child(
+                div().invisible().flex_none().h_0().overflow_hidden().child(
+                    export_button("history-action-width".into())
+                        .role(None)
+                        .disabled(true),
+                ),
+            );
+        v_flex()
+            .gap_4()
+            .child(heading)
+            .child(
+                v_flex()
+                    .rounded_lg()
+                    .overflow_hidden()
+                    .border_1()
+                    .border_color(theme.border)
+                    .child(columns)
+                    .children(rows),
+            )
             .into_any_element()
     }
 
@@ -1058,18 +1108,18 @@ impl TranslatorView {
         let theme = cx.theme();
         let accent = theme.primary;
         let drop_enabled = self.current_job.is_none() && !self.file_operation_busy();
+        let compact = !self.file_history.is_empty();
         v_flex()
             .id("file-drop-zone")
             .items_center()
-            .justify_center()
-            .text_center()
+            .when(compact, |zone| zone.flex_row().py_5())
+            .when(!compact, |zone| zone.justify_center().text_center().py_12())
             .gap_4()
             .px_5()
-            .py_12()
             .rounded_xl()
             .border_1()
             .border_dashed()
-            .border_color(theme.border)
+            .border_color(theme.muted_foreground.opacity(0.48))
             .bg(theme.muted.opacity(0.36))
             .when(drop_enabled, |zone| {
                 zone.drag_over::<ExternalPaths>(move |style, paths, _, _| {
@@ -1083,7 +1133,8 @@ impl TranslatorView {
             .child(
                 h_flex()
                     .justify_center()
-                    .size(px(52.))
+                    .flex_none()
+                    .size(px(48.))
                     .rounded_xl()
                     .bg(accent.opacity(0.12))
                     .child(
@@ -1094,6 +1145,7 @@ impl TranslatorView {
             )
             .child(
                 v_flex()
+                    .when(compact, |copy| copy.flex_1())
                     .gap_1()
                     .child(
                         div()

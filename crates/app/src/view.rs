@@ -2819,6 +2819,7 @@ impl Render for TranslatorView {
             (_, None) => None,
         };
 
+        let show_toolbar = !self.file_tab || !self.showing_file_history();
         let toolbar = h_flex()
             .px_3()
             .py_2()
@@ -3049,7 +3050,7 @@ impl Render for TranslatorView {
                             })),
                     ),
             )
-            .child(toolbar)
+            .when(show_toolbar, |view| view.child(toolbar))
             .when(self.jobs.busy() && !self.file_tab, |this| {
                 this.child(
                     div()
@@ -3071,7 +3072,7 @@ impl Render for TranslatorView {
                     .child(output_pane)
                     .into_any_element()
             })
-            .when(self.show_options, |this| {
+            .when(self.show_options && show_toolbar, |this| {
                 this.child(
                     h_flex()
                         .px_3()
