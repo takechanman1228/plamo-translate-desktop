@@ -7,6 +7,7 @@ use std::path::Path;
 use encoding_rs::{UTF_16BE, UTF_16LE};
 use thiserror::Error;
 
+pub mod markdown;
 
 pub const MAX_FILE_BYTES: usize = 4 * 1024 * 1024;
 
@@ -68,6 +69,15 @@ impl Document {
 
     pub fn source(&self) -> &str {
         &self.source
+    }
+
+    fn write_exact(&self, text: &str) -> Vec<u8> {
+        let mut out = Vec::with_capacity(text.len() + 3);
+        if self.bom {
+            out.extend_from_slice(&[0xef, 0xbb, 0xbf]);
+        }
+        out.extend_from_slice(text.as_bytes());
+        out
     }
 
     /// Encode translated text as UTF-8, preserving an existing UTF-8 BOM and uniform newlines.
